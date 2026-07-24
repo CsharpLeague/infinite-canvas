@@ -3,7 +3,7 @@
 import { memo, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Empty, Input, Pagination, Select, Spin } from "antd";
 import { useQuery } from "@tanstack/react-query";
-import { BookOpen, ChevronRight, Clapperboard, Eye, FileText, Image as ImageIcon, Music2, Plus, Search, Settings2, Type, Video } from "lucide-react";
+import { BookOpen, ChevronRight, Clapperboard, Eye, FileText, Group, Image as ImageIcon, Music2, Plus, Search, Settings2, Type, Video } from "lucide-react";
 import { motion } from "motion/react";
 
 import { AssetFormModal } from "@/components/assets/asset-form-modal";
@@ -51,6 +51,7 @@ const NODE_TYPE_ICON = {
     [CanvasNodeType.Text]: Type,
     [CanvasNodeType.Config]: Settings2,
     [CanvasNodeType.Director]: Clapperboard,
+    [CanvasNodeType.Group]: Group,
 };
 
 const NODE_TYPE_LABEL = {
@@ -61,6 +62,7 @@ const NODE_TYPE_LABEL = {
     [CanvasNodeType.Text]: "文本",
     [CanvasNodeType.Config]: "生成配置",
     [CanvasNodeType.Director]: "导演台",
+    [CanvasNodeType.Group]: "组",
 };
 
 const NODE_FILTER_OPTIONS = [
@@ -72,6 +74,7 @@ const NODE_FILTER_OPTIONS = [
     { label: "视频", value: CanvasNodeType.Video },
     { label: "音频", value: CanvasNodeType.Audio },
     { label: "导演台", value: CanvasNodeType.Director },
+    { label: "组", value: CanvasNodeType.Group },
 ];
 
 const ASSET_TYPE_OPTIONS = [

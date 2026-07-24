@@ -17,6 +17,7 @@ export enum CanvasNodeType {
     Video = "video",
     Audio = "audio",
     Director = "director",
+    Group = "group",
 }
 
 export type CanvasNodeStatus = "idle" | "success" | "loading" | "error";
@@ -33,6 +34,7 @@ export type CameraControlOptions = {
 
 export type CanvasNodeMetadata = {
     content?: string;
+    groupId?: string;
     composerContent?: string;
     prompt?: string;
     status?: CanvasNodeStatus;
