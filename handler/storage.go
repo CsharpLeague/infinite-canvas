@@ -5,7 +5,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/tigerowo/infinite-canvas/model"
 	"github.com/tigerowo/infinite-canvas/service"
@@ -159,9 +158,7 @@ func ProxyImage(w http.ResponseWriter, r *http.Request) {
 		Fail(w, "无效的 url")
 		return
 	}
-	client := &http.Client{
-		Timeout: 5 * time.Minute,
-	}
+	client := service.SafeProxyHTTPClient()
 	req, err := http.NewRequest(http.MethodGet, targetURL, nil)
 	if err != nil {
 		FailError(w, err)

@@ -50,14 +50,59 @@ export function canUseGlobalStorage(config: StorageConfig) {
     return config.mode === "server_sqlite_s3" && Boolean(user && user.role !== "guest" && (user.role === "admin" || config.allowUserGlobalProvider));
 }
 
-function getProxyUrl(url: string): string {
-    if (url.startsWith("http://") || url.startsWith("https://")) {
-        if (typeof window !== "undefined" && url.includes(window.location.host)) {
+function isLocalNetworkHost(hostname: string) {
+    const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+    if (
+        host === "localhost" ||
+        host.endsWith(".localhost") ||
+        host.endsWith(".local") ||
+        host === "host.docker.internal" ||
+        host === "::1"
+    ) {
+        return true;
+    }
+    if (
+        host.includes(":") &&
+        (host.startsWith("fc") ||
+            host.startsWith("fd") ||
+            /^fe[89ab]/.test(host))
+    ) {
+        return true;
+    }
+    const parts = host.split(".").map(Number);
+    if (
+        parts.length !== 4 ||
+        parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)
+    ) {
+        return false;
+    }
+    const [a, b] = parts;
+    return (
+        a === 10 ||
+        a === 127 ||
+        (a === 172 && b >= 16 && b <= 31) ||
+        (a === 192 && b === 168) ||
+        (a === 169 && b === 254)
+    );
+}
+
+export function getProxyUrl(url: string): string {
+    if (!url.startsWith("http://") && !url.startsWith("https://")) {
+        return url;
+    }
+    try {
+        const parsed = new URL(url);
+        if (
+            isLocalNetworkHost(parsed.hostname) ||
+            (typeof window !== "undefined" &&
+                parsed.host === window.location.host)
+        ) {
             return url;
         }
-        return `/api/proxy-image?url=${encodeURIComponent(url)}`;
+    } catch {
+        return url;
     }
-    return url;
+    return `/api/proxy-image?url=${encodeURIComponent(url)}`;
 }
 
 export async function uploadImage(input: string | Blob, options: UploadImageOptions = {}): Promise<UploadedImage> {
