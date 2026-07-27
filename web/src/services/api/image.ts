@@ -803,8 +803,22 @@ export async function requestEdit(config: AiConfig & { seedIndex?: number; seedC
     }
 }
 
-export async function createCanvasImageTask(config: AiConfig & { seedIndex?: number; seedCount?: number }, prompt: string, references: ReferenceImage[], options: CanvasImageTaskOptions = {}) {
-    if (!usesAccountProxy(config)) throw new Error("请先登录后再使用任务恢复");
+export async function createCanvasImageTask(config: AiConfig & { seedIndex?: number; seedCount?: number }, prompt: string, references: ReferenceImage[], options: CanvasImageTaskOptions = {}): Promise<CanvasImageTask> {
+    if (!usesAccountProxy(config)) {
+        const [image] = await requestImages({ ...config, count: "1" }, prompt, references);
+        if (!image) throw new Error("接口没有返回图片");
+        return {
+            id: options.clientTaskId || nanoid(),
+            source: options.source || "canvas",
+            source_id: options.sourceId || "",
+            node_id: options.nodeId || "",
+            model: config.model,
+            prompt,
+            status: "completed",
+            progress: 100,
+            image_url: image.dataUrl,
+        };
+    }
     const params = createImageRequestParams({ ...config, count: "1" });
     const request = await createCanvasImageTaskRequest({ ...config, count: "1" }, prompt, references, params, options);
     const response = await fetch("/api/v1/canvas/image-tasks", request);

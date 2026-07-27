@@ -2563,6 +2563,17 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                         targetIds.map(async (targetId) => {
                             try {
                                 const task = await createCanvasImageTask({ ...panoramaGenerationConfig, count: "1" }, panoramaPrompt, referenceImages, { nodeId: targetId, sourceId: projectId, clientTaskId: targetTaskIds[targetId] });
+                                if (task.image_url || task.url) {
+                                    setNodes((prev) => {
+                                        const root = prev.find((node) => node.id === rootId);
+                                        let next = applyCanvasImageTaskUpdate(prev, targetId, task, generationStartedAt, { width: panoramaNodeConfig.width, height: panoramaNodeConfig.height });
+                                        if (targetId !== rootId && root?.metadata?.primaryImageId === targetId) {
+                                            next = applyCanvasImageTaskUpdate(next, rootId, task, generationStartedAt, { width: panoramaNodeConfig.width, height: panoramaNodeConfig.height });
+                                        }
+                                        return next;
+                                    });
+                                    return true;
+                                }
                                 setNodes((prev) => {
                                     const root = prev.find((node) => node.id === rootId);
                                     return prev.map((node) => {
@@ -2704,6 +2715,17 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                         targetIds.map(async (targetId) => {
                             try {
                                 const task = await createCanvasImageTask({ ...generationConfig, count: "1" }, requestPrompt, referenceImages, { nodeId: targetId, sourceId: projectId, clientTaskId: targetTaskIds[targetId] });
+                                if (task.image_url || task.url) {
+                                    setNodes((prev) => {
+                                        const root = prev.find((node) => node.id === rootId);
+                                        let next = applyCanvasImageTaskUpdate(prev, targetId, task, generationStartedAt, { width: imageSize.width, height: imageSize.height });
+                                        if (targetId !== rootId && root?.metadata?.primaryImageId === targetId) {
+                                            next = applyCanvasImageTaskUpdate(next, rootId, task, generationStartedAt, { width: imageSize.width, height: imageSize.height });
+                                        }
+                                        return next;
+                                    });
+                                    return true;
+                                }
                                 setNodes((prev) => {
                                     const root = prev.find((node) => node.id === rootId);
                                     return prev.map((node) => {
@@ -3045,14 +3067,18 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
         [screenToCanvas, size.height, size.width],
     );
 
+    const insertAssetAtRef = useRef(insertAssetAt);
+    useLayoutEffect(() => {
+        insertAssetAtRef.current = insertAssetAt;
+    });
     const handleAssetInsert = useCallback(
         (payload: InsertAssetPayload) => {
             const position = assetInsertPositionRef.current || undefined;
             assetInsertPositionRef.current = null;
-            insertAssetAt(payload, position);
+            insertAssetAtRef.current(payload, position);
             setAssetPickerOpen(false);
         },
-        [insertAssetAt],
+        [],
     );
 
     const focusNode = useCallback(
@@ -3093,7 +3119,6 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
     }, []);
 
     if (!projectLoaded) return <CanvasRefreshShell />;
-
     return (
         <main className="flex h-full min-h-0 overflow-hidden" style={{ background: theme.canvas.background, color: theme.node.text }}>
             <CanvasSidePanel
