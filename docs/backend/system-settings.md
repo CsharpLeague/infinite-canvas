@@ -108,7 +108,7 @@ description: settings 表中 public 和 private 配置结构说明
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| `protocol` | string | 协议，当前为 `openai` |
+| `protocol` | string | 渠道类型：`openai`、`newapi`、`sub2api`、`ark` 或 `kie` |
 | `name` | string | 渠道名称 |
 | `baseUrl` | string | OpenAI 兼容接口地址 |
 | `apiKey` | string | 渠道密钥 |

@@ -11,6 +11,7 @@
 
 - [画布节点操作手册](canvas/canvas-node-manual.md)
 - [画布快捷键](canvas/canvas-shortcuts.md)
+- [模型渠道配置指南](backend/model-channel-guide.md)
 
 ## 开发文档
 

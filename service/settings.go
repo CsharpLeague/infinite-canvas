@@ -77,7 +77,51 @@ func AdminTestChannelModel(index *int, channel model.ModelChannel, modelName str
 	if isArkAgentPlanChannel(resolved) || isSeedanceModelName(modelName) {
 		return testArkSeedanceChannelModel(resolved, modelName)
 	}
+	if isKIEAdminChannel(resolved) {
+		return testConfiguredGenerationModel(resolved, modelName, "KIE")
+	}
+	if isImageModelName(modelName) {
+		return testConfiguredGenerationModel(resolved, modelName, channelDisplayName(resolved))
+	}
 	return testAdminChannelModel(resolved, modelName)
+}
+
+func channelDisplayName(channel model.ModelChannel) string {
+	switch strings.ToLower(strings.TrimSpace(channel.Protocol)) {
+	case "newapi":
+		return "New API"
+	case "sub2api":
+		return "Sub2API"
+	case "ark":
+		return "火山方舟"
+	case "kie":
+		return "KIE"
+	default:
+		return "OpenAI"
+	}
+}
+
+func testConfiguredGenerationModel(channel model.ModelChannel, modelName string, provider string) (string, error) {
+	if strings.TrimSpace(modelName) == "" {
+		return "", errors.New("缺少模型名称")
+	}
+	if isKIEAdminChannel(channel) {
+		return provider + " 生成模型配置已通过；未创建收费生成任务，请到对应工作台验证实际生成。", nil
+	}
+	models, err := fetchAdminChannelModels(channel)
+	if err != nil {
+		return "", err
+	}
+	for _, item := range models {
+		if item == modelName {
+			note := provider + " 已通过连接、鉴权和模型列表检查"
+			if strings.EqualFold(strings.TrimSpace(channel.Protocol), "sub2api") {
+				note += "；Sub2API 生图兼容取决于部署版本，建议使用 Responses 流式模式实测"
+			}
+			return note + "。", nil
+		}
+	}
+	return "", safeMessageError{message: "渠道连接正常，但模型列表中没有 " + modelName}
 }
 
 func normalizeSettings(settings model.Settings) model.Settings {
@@ -343,6 +387,9 @@ func normalizeModelChannelBaseURL(baseURL string) string {
 }
 
 func isArkAgentPlanChannel(channel model.ModelChannel) bool {
+	if strings.EqualFold(strings.TrimSpace(channel.Protocol), "ark") {
+		return true
+	}
 	baseURL := strings.ToLower(normalizeModelChannelBaseURL(channel.BaseURL))
 	return strings.HasSuffix(baseURL, "/api/plan/v3")
 }
@@ -635,6 +682,9 @@ func kieMarketModels() []string {
 }
 
 func testAdminChannelModel(channel model.ModelChannel, modelName string) (string, error) {
+	if strings.EqualFold(strings.TrimSpace(channel.Protocol), "sub2api") {
+		return testSub2APITextModel(channel, modelName)
+	}
 	if strings.TrimSpace(modelName) == "" {
 		return "", errors.New("缺少模型名称")
 	}
@@ -672,6 +722,26 @@ func testAdminChannelModel(channel model.ModelChannel, modelName string) (string
 		return payload.Choices[0].Message.Content, nil
 	}
 	return "ok", nil
+}
+
+func testSub2APITextModel(channel model.ModelChannel, modelName string) (string, error) {
+	body, _ := json.Marshal(map[string]any{"model": modelName, "input": "hi", "stream": false})
+	request, err := http.NewRequest(http.MethodPost, BuildModelChannelURL(channel, "/responses"), strings.NewReader(string(body)))
+	if err != nil {
+		return "", err
+	}
+	request.Header.Set("Authorization", "Bearer "+channel.APIKey)
+	request.Header.Set("Content-Type", "application/json")
+	response, err := adminModelHTTPClient.Do(request)
+	if err != nil {
+		return "", safeMessageError{message: "测试失败：Sub2API 上游接口无响应或网络不可达"}
+	}
+	defer response.Body.Close()
+	responseBody, _ := io.ReadAll(response.Body)
+	if response.StatusCode >= http.StatusBadRequest {
+		return "", readAdminChannelError(responseBody, response.StatusCode, "Sub2API Responses 测试失败")
+	}
+	return "Sub2API Responses 接口响应正常", nil
 }
 
 func testArkSeedanceChannelModel(channel model.ModelChannel, modelName string) (string, error) {

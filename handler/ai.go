@@ -530,7 +530,7 @@ func resolveAIProxyPath(channel model.ModelChannel, modelName string, path strin
 		}
 		return path
 	}
-	if isArkSeedanceVideo(channel.BaseURL, modelName) {
+	if isArkSeedanceVideo(channel, modelName) {
 		if path == "/videos" {
 			return "/contents/generations/tasks"
 		}
@@ -541,10 +541,14 @@ func resolveAIProxyPath(channel model.ModelChannel, modelName string, path strin
 	return path
 }
 
-func isArkSeedanceVideo(baseURL string, modelName string) bool {
-	base := strings.ToLower(baseURL)
+func isArkSeedanceVideo(channel model.ModelChannel, modelName string) bool {
+	base := strings.ToLower(channel.BaseURL)
 	model := strings.ToLower(modelName)
-	return strings.Contains(model, "seedance") || strings.Contains(model, "doubao-seedance") || strings.Contains(base, "/api/plan/v3")
+	return strings.EqualFold(strings.TrimSpace(channel.Protocol), "ark") ||
+		strings.Contains(model, "seedance") ||
+		strings.Contains(model, "doubao-seedance") ||
+		strings.Contains(base, "/api/v3") ||
+		strings.Contains(base, "/api/plan/v3")
 }
 
 func isAgnesVideoModel(modelName string) bool {

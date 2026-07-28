@@ -161,7 +161,7 @@ func proxyAIVideoTaskRequest(w http.ResponseWriter, r *http.Request) {
 		ChannelName:     channel.Name,
 		Source:          readVideoTaskSource(r),
 		SourceID:        readVideoTaskSourceID(r),
-		ClientTaskID:     readClientVideoTaskID(r),
+		ClientTaskID:    readClientVideoTaskID(r),
 		UpstreamTaskID:  parsed.UpstreamTaskID,
 		UpstreamVideoID: parsed.UpstreamVideoID,
 		Status:          parsed.Status,
@@ -299,6 +299,9 @@ func pollVideoTaskFromUpstream(task model.VideoTask) (service.VideoTaskPollUpdat
 }
 
 func normalizeVideoCreateBody(body []byte, contentType string, modelName string, channel model.ModelChannel, upstreamPath string) ([]byte, string, error) {
+	if isArkSeedanceVideo(channel, modelName) && upstreamPath == "/contents/generations/tasks" {
+		return normalizeArkSeedanceVideoBody(body, contentType, modelName)
+	}
 	if isKIEChannel(channel, modelName) && upstreamPath == "/jobs/createTask" {
 		return normalizeKIEVideoBody(body, contentType, modelName, channel)
 	}
@@ -385,7 +388,7 @@ func parseVideoTaskPayload(payload []byte, modelName string) parsedVideoTaskPayl
 		Progress:        readIntPath(data, "progress"),
 		Seconds:         firstNonEmpty(readStringPath(data, "seconds"), readStringPath(data, "duration")),
 		Size:            firstNonEmpty(readStringPath(data, "size"), readSizeFromDimensions(data)),
-		VideoURL:        firstNonEmpty(readStringPath(data, "video_url"), readStringPath(data, "url"), readStringPath(data, "remixed_from_video_id"), readStringPath(data, "output_url"), readStringPath(data, "download_url"), findFirstHTTPURL(data)),
+		VideoURL:        firstNonEmpty(readStringPath(data, "video_url"), readStringPath(data, "content.video_url"), readStringPath(data, "url"), readStringPath(data, "remixed_from_video_id"), readStringPath(data, "output_url"), readStringPath(data, "download_url"), findFirstHTTPURL(data)),
 		Error:           firstNonEmpty(readStringPath(data, "error.message"), readStringPath(data, "error")),
 		ErrorDetail:     "",
 	}
@@ -529,7 +532,7 @@ func findFirstHTTPURL(value any) string {
 			}
 		}
 	case map[string]any:
-		for _, key := range []string{"url", "video_url", "videoUrl", "download_url", "downloadUrl", "output_url", "outputUrl", "resultUrls", "result_urls", "videoUrls", "video_urls", "urls", "videos", "video", "data", "result", "metadata"} {
+		for _, key := range []string{"url", "video_url", "videoUrl", "download_url", "downloadUrl", "output_url", "outputUrl", "resultUrls", "result_urls", "videoUrls", "video_urls", "urls", "videos", "video", "content", "data", "result", "metadata"} {
 			if url := findFirstHTTPURL(typed[key]); url != "" {
 				return url
 			}

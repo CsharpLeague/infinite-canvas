@@ -45,6 +45,14 @@ const emptySettings: AdminSettings = {
     private: { channels: [], promptSync: { enabled: true, cron: "0 0 * * *" }, aiLog: { localDirectReportEnabled: false, cleanup: { enabled: false, retentionDays: 14, cron: "0 3 * * *" } }, auth: { linuxDo: { clientId: "", clientSecret: "" } }, storage: { mode: "local_indexeddb", allowUserProvider: false, allowUserGlobalProvider: true, providers: [], roundRobinCursor: 0, capacityCheck: { enabled: false, cron: "0 */6 * * *" }, capacityLimitBytes: 9 * 1024 * 1024 * 1024 } },
 };
 const emptyChannel: AdminModelChannel = { id: "", protocol: "openai", name: "", baseUrl: "", apiKey: "", models: [], weight: 1, timeout: 600, enabled: true, remark: "" };
+const channelProtocolOptions = [
+    { label: "通用 OpenAI", value: "openai" },
+    { label: "New API", value: "newapi" },
+    { label: "Sub2API", value: "sub2api" },
+    { label: "火山方舟", value: "ark" },
+    { label: "KIE", value: "kie" },
+];
+const channelProtocolLabels = Object.fromEntries(channelProtocolOptions.map((item) => [item.value, item.label]));
 const emptyStorageProvider: AdminStorageProvider = { id: "", name: "", type: "s3", endpoint: "", region: "auto", bucket: "", accessKeyId: "", secretAccessKey: "", publicBaseUrl: "", pathPrefix: "canvas", weight: 1, enabled: true, ownerUserId: "", capacityBytes: 0, capacityCheckedAt: "", capacityExceeded: false };
 
 type SettingsTabKey = "public" | "private";
@@ -760,7 +768,7 @@ export default function AdminSettingsPage() {
                                     dataSource={channelTableData}
                                     columns={[
                                         { title: "名称", dataIndex: "name", render: (value) => value || "未命名渠道" },
-                                        { title: "协议", dataIndex: "protocol", width: 96, render: (value) => <Tag>{value || "openai"}</Tag> },
+                                        { title: "渠道类型", dataIndex: "protocol", width: 112, render: (value) => <Tag>{channelProtocolLabels[value] || value || "通用 OpenAI"}</Tag> },
                                         { title: "状态", dataIndex: "enabled", width: 96, render: (value) => <Tag color={value ? "success" : "default"}>{value ? "已启用" : "已停用"}</Tag> },
                                         {
                                             title: "模型",
@@ -840,13 +848,8 @@ export default function AdminSettingsPage() {
                                 </Form.Item>
                             </Col>
                             <Col span={12}>
-                                <Form.Item name="protocol" label="协议">
-                                    <Select
-                                        options={[
-                                            { label: "OpenAI", value: "openai" },
-                                            { label: "KIE", value: "kie" },
-                                        ]}
-                                    />
+                                <Form.Item name="protocol" label="渠道类型" extra="New API 使用标准 OpenAI 接口；Sub2API 主要使用 Responses；视频推荐选择火山方舟。">
+                                    <Select options={channelProtocolOptions} />
                                 </Form.Item>
                             </Col>
                             <Col span={12}>
@@ -983,7 +986,7 @@ export default function AdminSettingsPage() {
                     destroyOnHidden
                 >
                     <Flex vertical gap={12}>
-                        <Typography.Text type="secondary">测试会向选中模型发送一条 hi，用于确认渠道是否有响应。</Typography.Text>
+                        <Typography.Text type="secondary">文本模型会发送最小文本请求；图片、视频和 KIE 模型只检查连接、鉴权与模型配置，不会创建收费任务。</Typography.Text>
                         <Input.Search placeholder="搜索模型..." allowClear value={testKeyword} onChange={(event) => setTestKeyword(event.target.value)} />
                         <Table
                             rowKey="model"
