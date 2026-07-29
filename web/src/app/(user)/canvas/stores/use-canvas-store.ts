@@ -7,7 +7,7 @@ import { listCanvasProjects, saveCanvasProject, syncCanvasProjects } from "@/ser
 import { fetchUserConfig } from "@/services/api/user-config";
 import { useUserStore } from "@/stores/use-user-store";
 import type { CanvasBackgroundMode } from "@/lib/canvas-theme";
-import type { CanvasAssistantSession, CanvasConnection, CanvasNodeData, ViewportTransform } from "../types";
+import type { CanvasAgentConfig, CanvasAssistantSession, CanvasConnection, CanvasNodeData, ViewportTransform } from "../types";
 
 export type CanvasSidePanelState = {
     open: boolean;
@@ -15,6 +15,7 @@ export type CanvasSidePanelState = {
 };
 
 export const DEFAULT_CANVAS_SIDE_PANEL: CanvasSidePanelState = { open: true, width: 280 };
+export const DEFAULT_CANVAS_AGENT_PANEL: CanvasSidePanelState = { open: false, width: 390 };
 
 export type CanvasProject = {
     id: string;
@@ -25,10 +26,12 @@ export type CanvasProject = {
     connections: CanvasConnection[];
     chatSessions: CanvasAssistantSession[];
     activeChatId: string | null;
+    agentConfig: CanvasAgentConfig | null;
     backgroundMode: CanvasBackgroundMode;
     showImageInfo: boolean;
     viewport: ViewportTransform;
     sidePanel: CanvasSidePanelState;
+    agentPanel: CanvasSidePanelState;
 };
 
 type CanvasStore = {
@@ -39,7 +42,7 @@ type CanvasStore = {
     openProject: (id: string) => CanvasProject | null;
     renameProject: (id: string, title: string) => void;
     deleteProjects: (ids: string[]) => void;
-    updateProject: (id: string, patch: Partial<Pick<CanvasProject, "nodes" | "connections" | "chatSessions" | "activeChatId" | "backgroundMode" | "showImageInfo" | "viewport" | "sidePanel">>) => void;
+    updateProject: (id: string, patch: Partial<Pick<CanvasProject, "nodes" | "connections" | "chatSessions" | "activeChatId" | "agentConfig" | "backgroundMode" | "showImageInfo" | "viewport" | "sidePanel" | "agentPanel">>) => void;
     syncWithRemote: (token: string, syncEnabled: boolean) => Promise<void>;
     setSyncEnabled: (enabled: boolean) => void;
 };
@@ -247,10 +250,12 @@ export const useCanvasStore = create<CanvasStore>()(
                     connections: [],
                     chatSessions: [],
                     activeChatId: null,
+                    agentConfig: null,
                     backgroundMode: "lines",
                     showImageInfo: false,
                     viewport: initialViewport,
                     sidePanel: DEFAULT_CANVAS_SIDE_PANEL,
+                    agentPanel: DEFAULT_CANVAS_AGENT_PANEL,
                 };
                 set((state) => ({
                     projects: [project, ...state.projects],
@@ -269,10 +274,12 @@ export const useCanvasStore = create<CanvasStore>()(
                     connections: source.connections || [],
                     chatSessions: source.chatSessions || [],
                     activeChatId: source.activeChatId || null,
+                    agentConfig: source.agentConfig || null,
                     backgroundMode: source.backgroundMode || "lines",
                     showImageInfo: source.showImageInfo || false,
                     viewport: source.viewport || initialViewport,
                     sidePanel: source.sidePanel || DEFAULT_CANVAS_SIDE_PANEL,
+                    agentPanel: source.agentPanel || DEFAULT_CANVAS_AGENT_PANEL,
                 };
                 set((state) => ({
                     projects: [project, ...state.projects],

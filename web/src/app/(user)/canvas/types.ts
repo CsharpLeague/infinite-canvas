@@ -37,6 +37,7 @@ export type CanvasNodeMetadata = {
     groupId?: string;
     composerContent?: string;
     prompt?: string;
+    excludeUpstreamText?: boolean;
     status?: CanvasNodeStatus;
     errorDetails?: string;
     fontSize?: number;
@@ -128,7 +129,9 @@ export type CanvasAssistantReference = {
     type: CanvasNodeType;
     title: string;
     dataUrl?: string;
+    url?: string;
     storageKey?: string;
+    mimeType?: string;
     text?: string;
 };
 
@@ -140,12 +143,62 @@ export type CanvasAssistantImage = {
     source?: "asset" | "library";
 };
 
+export type CanvasAgentPhase =
+    | "intake"
+    | "concept"
+    | "script"
+    | "breakdown"
+    | "references"
+    | "storyboard"
+    | "video"
+    | "audio"
+    | "review"
+    | "complete";
+
+export type CanvasAgentConfig = {
+    imageQuality: string;
+    imageSize: string;
+    videoQuality: string;
+    videoSize: string;
+};
+
+export type CanvasAgentState = {
+    phase: CanvasAgentPhase;
+    brief?: string;
+    targetDurationSeconds?: number;
+    approvedPlan?: string;
+    approvedNodeIds: string[];
+    referenceNodeIds: string[];
+    pendingTaskIds: string[];
+    completedTaskIds: string[];
+};
+
+export type CanvasAgentContent =
+    | string
+    | Array<
+        | { type: "text"; text: string }
+        | { type: "image_url"; image_url: { url: string } }
+    >;
+
+export type CanvasAgentToolCall = {
+    id: string;
+    name: string;
+    arguments: Record<string, unknown>;
+};
+
+export type CanvasAgentProtocolMessage =
+    | { role: "user" | "system"; content: CanvasAgentContent }
+    | { role: "assistant"; content?: string; toolCalls?: CanvasAgentToolCall[] }
+    | { role: "tool"; content: string; toolCallId: string; name: string };
+
+export type CanvasAssistantMessageStatus = "thinking" | "running" | "waiting" | "success" | "error";
+
 export type CanvasAssistantMessage = {
     id: string;
     role: "user" | "assistant";
-    mode: "ask" | "image";
     text: string;
-    isLoading?: boolean;
+    status?: CanvasAssistantMessageStatus;
+    activity?: string;
     references?: CanvasAssistantReference[];
     images?: CanvasAssistantImage[];
 };
@@ -154,6 +207,8 @@ export type CanvasAssistantSession = {
     id: string;
     title: string;
     messages: CanvasAssistantMessage[];
+    agentState: CanvasAgentState;
+    protocolMessages: CanvasAgentProtocolMessage[];
     createdAt: string;
     updatedAt: string;
 };
@@ -174,14 +229,14 @@ export type SelectionBox = {
 
 export type ContextMenuState =
     | {
-          type: "node";
-          x: number;
-          y: number;
-          nodeId: string;
-      }
+        type: "node";
+        x: number;
+        y: number;
+        nodeId: string;
+    }
     | {
-          type: "connection";
-          x: number;
-          y: number;
-          connectionId: string;
-      };
+        type: "connection";
+        x: number;
+        y: number;
+        connectionId: string;
+    };

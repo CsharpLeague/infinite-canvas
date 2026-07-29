@@ -41,11 +41,11 @@ export function buildNodeGenerationContext(nodeId: string, nodes: CanvasNodeData
     }
 
     const advanced = buildCanvasVideoAdvancedContext(sourceNode, inputs);
-    const upstreamText = inputs
-        .filter((input) => !advanced.textNodeIds.has(input.nodeId))
-        .map((input) => input.text)
-        .filter(Boolean)
-        .join("\n\n");
+    const upstreamText = sourceNode?.metadata?.excludeUpstreamText? "": inputs
+            .filter((input) => !advanced.textNodeIds.has(input.nodeId))
+            .map((input) => input.text)
+            .filter(Boolean)
+            .join("\n\n");
     const referenceImages = inputs.filter((input) => !advanced.referenceNodeIds.has(input.nodeId)).map((input) => input.image).filter((image): image is ReferenceImage => Boolean(image));
     const referenceVideos = inputs.filter((input) => !advanced.referenceNodeIds.has(input.nodeId)).map((input) => input.video).filter((video): video is ReferenceVideo => Boolean(video));
     const referenceAudios = inputs.filter((input) => !advanced.referenceNodeIds.has(input.nodeId)).map((input) => input.audio).filter((audio): audio is ReferenceAudio => Boolean(audio));

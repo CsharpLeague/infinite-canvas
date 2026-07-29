@@ -437,13 +437,13 @@ function usesAccountProxy(config: AiConfig) {
     return config.channelMode === "remote" || (config.channelMode === "local" && Boolean(token));
 }
 
-function aiApiUrl(config: AiConfig, path: string) {
+export function aiApiUrl(config: AiConfig, path: string) {
     if (usesAccountProxy(config)) return `/api/v1${path}`;
     const channel = localChannelForActiveModel(config);
     return buildApiUrl(channel?.baseUrl || config.baseUrl, path);
 }
 
-function aiHeaders(config: AiConfig, contentType?: string) {
+export function aiHeaders(config: AiConfig, contentType?: string) {
     const token = useUserStore.getState().token;
     if (config.channelMode === "remote" && !token) throw new Error("请先登录后再使用云端渠道");
     if (config.channelMode === "remote") {
@@ -467,7 +467,7 @@ function aiHeaders(config: AiConfig, contentType?: string) {
     };
 }
 
-function refreshRemoteUser(config: AiConfig) {
+export function refreshRemoteUser(config: AiConfig) {
     if (usesAccountProxy(config)) void useUserStore.getState().hydrateUser();
 }
 
