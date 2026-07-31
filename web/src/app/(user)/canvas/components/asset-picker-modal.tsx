@@ -10,14 +10,11 @@ import { useAssetStore, type Asset } from "@/stores/use-asset-store";
 import { fetchAssetLibrary, type AssetLibraryItem } from "@/services/api/assets";
 import { uploadAssetMediaFile } from "@/services/file-storage";
 import { uploadImage } from "@/services/image-storage";
+import type { InsertAssetPayload } from "../types";
+
+export type { InsertAssetPayload } from "../types";
 
 export type AssetPickerTab = "my-assets" | "library";
-
-export type InsertAssetPayload =
-    | { kind: "text"; content: string; title: string; assetId?: string; source?: "asset" | "library" }
-    | { kind: "image"; dataUrl: string; title: string; storageKey?: string; assetId?: string; width?: number; height?: number; bytes?: number; mimeType?: string; source?: "asset" | "library" }
-    | { kind: "video"; url: string; title: string; storageKey?: string; assetId?: string; width?: number; height?: number; bytes?: number; mimeType?: string; source?: "asset" | "library" }
-    | { kind: "audio"; url: string; title: string; storageKey?: string; assetId?: string; bytes?: number; mimeType?: string; durationMs?: number; source?: "asset" | "library" };
 
 type Props = {
     open: boolean;

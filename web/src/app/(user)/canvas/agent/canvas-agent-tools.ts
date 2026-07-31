@@ -109,8 +109,8 @@ export const CANVAS_AGENT_TOOLS: CanvasAgentToolDefinition[] = [
     defineTool(
         "create_primary_script_node",
         "仅用于新创作流程首次创建正式主剧本或总制作稿，固定使用主剧本节点尺寸。",
-        { title: STRING, content: STRING, sourceNodeIds: STRING_ARRAY },
-        ["title", "content"],
+        { title: STRING, content: STRING, sourceNodeIds: STRING_ARRAY, projectTitle: STRING },
+        ["title", "content", "projectTitle"],
     ),
     defineTool(
         "create_text_node",
@@ -195,6 +195,13 @@ export function normalizeCanvasAgentAction(name: unknown, args: unknown, id = na
             };
             break;
         case "create_primary_script_node":
+            normalized = {
+                title: requiredString(input.title, "title"),
+                content: requiredString(input.content, "content"),
+                sourceNodeIds: stringArray(input.sourceNodeIds),
+                projectTitle: requiredString(input.projectTitle, "projectTitle"),
+            };
+            break;
         case "create_text_node":
             normalized = {
                 title: requiredString(input.title, "title"),

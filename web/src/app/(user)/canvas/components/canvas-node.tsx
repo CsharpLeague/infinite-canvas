@@ -630,6 +630,7 @@ function ImageNodeContent(props: NodeContentRendererProps) {
 function PanoramaNodeContent(props: NodeContentRendererProps) {
     const src = props.node.metadata?.content;
     if (!src) return <ImageNodeContent {...props} />;
+    const proxyGeneratedPanorama = Boolean(props.node.metadata?.imageTaskId || props.node.metadata?.imageTaskResultId) && !props.node.metadata?.storageKey;
 
     return (
         <ImageContent
@@ -641,7 +642,7 @@ function PanoramaNodeContent(props: NodeContentRendererProps) {
             batchRecovering={props.batchRecovering}
             onToggleBatch={props.onToggleBatch}
             onSetBatchPrimary={props.onSetBatchPrimary}
-            media={<CanvasPanoramaViewer src={src} alt={props.node.title} expandOnDoubleClick={!props.isBatchRoot} onMoveStart={props.onMoveStart} onOpen={props.onViewImage ? () => props.onViewImage?.(props.node) : undefined} />}
+            media={<CanvasPanoramaViewer src={src} alt={props.node.title} proxyGeneratedPanorama={proxyGeneratedPanorama} expandOnDoubleClick={!props.isBatchRoot} onMoveStart={props.onMoveStart} onOpen={props.onViewImage ? () => props.onViewImage?.(props.node) : undefined} />}
         />
     );
 }

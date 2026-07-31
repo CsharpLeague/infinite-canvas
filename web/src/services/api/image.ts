@@ -109,7 +109,6 @@ function normalizeBoundedInteger(value: string | number, fallback: number, min: 
     return Math.max(min, Math.min(max, number));
 }
 
-/** Map "quality + ratio" to an explicit pixel dimension like "3840x2160". Returns undefined when quality is auto. */
 function resolveSize(quality: string, ratio: string): string | undefined {
     const basePixels = QUALITY_BASE[quality];
     if (!basePixels || ratio === "auto" || !ratio) return undefined;
@@ -120,18 +119,16 @@ function resolveSize(quality: string, ratio: string): string | undefined {
     const h = Number(parts[1]);
     if (!w || !h) return undefined;
 
-    const targetPixels = basePixels * basePixels;
-    const isLandscape = w >= h;
-    const longRatio = isLandscape ? w / h : h / w;
+    let a = Math.round(w);
+    let b = Math.round(h);
+    while (b) {
+        const remainder = a % b;
+        a = b;
+        b = remainder;
+    }
 
-    const longSideRaw = Math.sqrt(targetPixels * longRatio);
-    const longSide = Math.floor(longSideRaw / 16) * 16;
-    const shortSide = Math.round(longSide / longRatio / 16) * 16;
-
-    const width = isLandscape ? longSide : shortSide;
-    const height = isLandscape ? shortSide : longSide;
-
-    return `${width}x${height}`;
+    const unit = Math.round(Math.sqrt((basePixels * basePixels) / ((w / a) * (h / a))) / 16) * 16;
+    return `${(w / a) * unit}x${(h / a) * unit}`;
 }
 
 function resolveRequestSize(quality: string | undefined, size: string) {

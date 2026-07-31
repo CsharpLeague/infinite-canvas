@@ -135,6 +135,23 @@ export type CanvasAssistantReference = {
     text?: string;
 };
 
+export type InsertAssetPayload =
+    | { kind: "text"; content: string; title: string; assetId?: string; source?: "asset" | "library" }
+    | { kind: "image"; dataUrl: string; title: string; storageKey?: string; assetId?: string; width?: number; height?: number; bytes?: number; mimeType?: string; source?: "asset" | "library" }
+    | { kind: "video"; url: string; title: string; storageKey?: string; assetId?: string; width?: number; height?: number; bytes?: number; mimeType?: string; source?: "asset" | "library" }
+    | { kind: "audio"; url: string; title: string; storageKey?: string; assetId?: string; bytes?: number; mimeType?: string; durationMs?: number; source?: "asset" | "library" };
+
+export type PendingAgentAsset = {
+    nodeId: string;
+    payload: InsertAssetPayload;
+    reference: CanvasAssistantReference;
+};
+
+export type CanvasPendingAgentRequest = {
+    prompt: string;
+    assets: PendingAgentAsset[];
+};
+
 export type CanvasAssistantImage = {
     id: string;
     dataUrl: string;

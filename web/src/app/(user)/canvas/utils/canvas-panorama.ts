@@ -1,6 +1,6 @@
 import { CanvasNodeType } from "../types";
 
-export const PANORAMA_IMAGE_SIZE = "2048x1024";
+export const PANORAMA_IMAGE_SIZE = "2:1";
 export const PANORAMA_NODE_SIZE = { width: 340, height: 170 } as const;
 
 const SPHERICAL_PROMPT = "最终图片必须是等距柱状投影的完整球形全景图，比例2比1，宽度是高度的2倍，只输出一张连续画面，适合作为 3D 导演台环境球内壁贴图。水平视角覆盖完整360度，垂直视角覆盖从天空或天花板到地面或地板的完整180度，观看者位于场景中心，可以向上、向下、向左、向右完整环视整个环境，地平线必须位于画面垂直中心附近，左右边缘必须自然无缝衔接，不要普通横幅照片、不要21比9电影宽银幕截图、不要鱼眼圆形边框、不要多图拼接、不要文字、水印、边框或明显接缝";
