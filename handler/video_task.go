@@ -86,7 +86,7 @@ func proxyAIVideoTaskRequest(w http.ResponseWriter, r *http.Request) {
 	body, contentType, err = normalizeVideoCreateBody(body, contentType, modelName, channel, upstreamPath)
 	if err != nil {
 		log.Printf("AI video normalize request failed: model=%s err=%v", modelName, err)
-		Fail(w, "AI 接口请求失败")
+		Fail(w, err.Error())
 		return
 	}
 	request, err := http.NewRequest(http.MethodPost, service.BuildModelChannelURL(channel, upstreamPath), bytes.NewReader(body))
@@ -110,17 +110,39 @@ func proxyAIVideoTaskRequest(w http.ResponseWriter, r *http.Request) {
 		Credits:         credits,
 		RequestBody:     summarizeAIRequest(body, contentType),
 	}
+	clientTaskID := readClientVideoTaskID(r)
+	taskSource := readVideoTaskSource(r)
+	taskSourceID := readVideoTaskSourceID(r)
 	if credits > 0 {
 		if err := service.ConsumeUserCredits(user.ID, modelName, credits, upstreamPath); err != nil {
 			FailError(w, err)
 			return
 		}
 	}
+	var pendingTask *model.VideoTask
+	if clientTaskID != "" {
+		task, saveErr := service.CreateVideoTask(service.VideoTaskCreateInput{
+			UserID: user.ID, UserDisplayName: firstNonEmpty(user.DisplayName, user.Username), Model: modelName,
+			ChannelID: channel.ID, UserChannelID: userChannelID, ChannelName: channel.Name,
+			Source: taskSource, SourceID: taskSourceID, ClientTaskID: clientTaskID,
+			Status: "queued", RequestBody: logContext.RequestBody, Credits: credits,
+		})
+		if saveErr != nil {
+			log.Printf("save pending video task failed: model=%s err=%v", modelName, saveErr)
+			if credits > 0 {
+				refundVideoCredits(user.ID, modelName, credits, upstreamPath)
+			}
+			Fail(w, "AI 接口请求失败")
+			return
+		}
+		pendingTask = &task
+	}
 	payload, status, err := doAIRequest(request, channel)
 	if err != nil {
 		if credits > 0 {
 			refundVideoCredits(user.ID, modelName, credits, upstreamPath)
 		}
+		failPendingVideoTask(pendingTask, "视频任务创建失败", err.Error())
 		saveAIProxyLog(logContext, 0, "", err.Error())
 		Fail(w, "AI 接口请求失败")
 		return
@@ -130,6 +152,7 @@ func proxyAIVideoTaskRequest(w http.ResponseWriter, r *http.Request) {
 		if credits > 0 {
 			refundVideoCredits(user.ID, modelName, credits, upstreamPath)
 		}
+		failPendingVideoTask(pendingTask, message, string(payload))
 		saveAIProxyLog(logContext, status, string(payload), strings.TrimSpace(string(payload)))
 		Fail(w, message)
 		return
@@ -139,6 +162,7 @@ func proxyAIVideoTaskRequest(w http.ResponseWriter, r *http.Request) {
 		if credits > 0 {
 			refundVideoCredits(user.ID, modelName, credits, upstreamPath)
 		}
+		failPendingVideoTask(pendingTask, message, string(transformed))
 		saveAIProxyLog(logContext, status, string(payload), message)
 		Fail(w, message)
 		return
@@ -148,6 +172,7 @@ func proxyAIVideoTaskRequest(w http.ResponseWriter, r *http.Request) {
 		if credits > 0 {
 			refundVideoCredits(user.ID, modelName, credits, upstreamPath)
 		}
+		failPendingVideoTask(pendingTask, "视频接口没有返回任务 ID", string(transformed))
 		saveAIProxyLog(logContext, status, string(transformed), "视频接口没有返回任务 ID")
 		Fail(w, "视频接口没有返回任务 ID")
 		return
@@ -159,9 +184,9 @@ func proxyAIVideoTaskRequest(w http.ResponseWriter, r *http.Request) {
 		ChannelID:       channel.ID,
 		UserChannelID:   userChannelID,
 		ChannelName:     channel.Name,
-		Source:          readVideoTaskSource(r),
-		SourceID:        readVideoTaskSourceID(r),
-		ClientTaskID:    readClientVideoTaskID(r),
+		Source:          taskSource,
+		SourceID:        taskSourceID,
+		ClientTaskID:    clientTaskID,
 		UpstreamTaskID:  parsed.UpstreamTaskID,
 		UpstreamVideoID: parsed.UpstreamVideoID,
 		Status:          parsed.Status,
@@ -169,6 +194,8 @@ func proxyAIVideoTaskRequest(w http.ResponseWriter, r *http.Request) {
 		Seconds:         parsed.Seconds,
 		Size:            parsed.Size,
 		VideoURL:        parsed.VideoURL,
+		FirstFrameURL:   parsed.FirstFrameURL,
+		LastFrameURL:    parsed.LastFrameURL,
 		Error:           parsed.Error,
 		ErrorDetail:     parsed.ErrorDetail,
 		RequestBody:     logContext.RequestBody,
@@ -177,11 +204,21 @@ func proxyAIVideoTaskRequest(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		log.Printf("save video task failed: model=%s err=%v", modelName, err)
+		failPendingVideoTask(pendingTask, "视频任务保存失败", err.Error())
 		Fail(w, "AI 接口请求失败")
 		return
 	}
 	saveAIProxyLog(logContext, status, string(transformed), "")
 	OK(w, service.VideoTaskResponse(task))
+}
+
+func failPendingVideoTask(task *model.VideoTask, message string, detail string) {
+	if task == nil {
+		return
+	}
+	if err := service.UpdateVideoTaskFromPoll(*task, service.VideoTaskPollUpdate{Status: "failed", Error: message, ErrorDetail: detail}); err != nil {
+		log.Printf("mark pending video task failed: id=%s err=%v", task.ID, err)
+	}
 }
 
 func readClientVideoTaskID(r *http.Request) string {
@@ -217,6 +254,12 @@ func serveAIVideoTask(w http.ResponseWriter, r *http.Request, id string) bool {
 	}
 	if !found {
 		return false
+	}
+	if service.IsFailedVideoTaskStatus(task.Status) && strings.Contains(task.Error, "上传云存储") {
+		if update, pollErr := pollVideoTaskFromUpstream(task); pollErr == nil {
+			_ = service.UpdateVideoTaskFromPoll(task, update)
+			task, _, _ = service.GetUserVideoTask(user.ID, id)
+		}
 	}
 	OK(w, service.VideoTaskResponse(task))
 	return true
@@ -287,14 +330,16 @@ func pollVideoTaskFromUpstream(task model.VideoTask) (service.VideoTaskPollUpdat
 	}
 	saveAIProxyLog(logContext, status, string(transformed), firstNonEmpty(parsed.Error, ""))
 	return service.VideoTaskPollUpdate{
-		Status:       parsed.Status,
-		Progress:     parsed.Progress,
-		Seconds:      parsed.Seconds,
-		Size:         parsed.Size,
-		VideoURL:     parsed.VideoURL,
-		Error:        parsed.Error,
-		ErrorDetail:  parsed.ErrorDetail,
-		ResponseBody: string(transformed),
+		Status:        parsed.Status,
+		Progress:      parsed.Progress,
+		Seconds:       parsed.Seconds,
+		Size:          parsed.Size,
+		VideoURL:      parsed.VideoURL,
+		FirstFrameURL: parsed.FirstFrameURL,
+		LastFrameURL:  parsed.LastFrameURL,
+		Error:         parsed.Error,
+		ErrorDetail:   parsed.ErrorDetail,
+		ResponseBody:  string(transformed),
 	}, nil
 }
 
@@ -371,6 +416,8 @@ type parsedVideoTaskPayload struct {
 	Seconds         string
 	Size            string
 	VideoURL        string
+	FirstFrameURL   string
+	LastFrameURL    string
 	Error           string
 	ErrorDetail     string
 }
@@ -389,6 +436,8 @@ func parseVideoTaskPayload(payload []byte, modelName string) parsedVideoTaskPayl
 		Seconds:         firstNonEmpty(readStringPath(data, "seconds"), readStringPath(data, "duration")),
 		Size:            firstNonEmpty(readStringPath(data, "size"), readSizeFromDimensions(data)),
 		VideoURL:        firstNonEmpty(readStringPath(data, "video_url"), readStringPath(data, "content.video_url"), readStringPath(data, "url"), readStringPath(data, "remixed_from_video_id"), readStringPath(data, "output_url"), readStringPath(data, "download_url"), findFirstHTTPURL(data)),
+		FirstFrameURL:   firstNonEmpty(readStringPath(data, "first_frame_url"), readStringPath(data, "firstFrameUrl"), readStringPath(data, "content.first_frame_url"), readStringPath(data, "content.firstFrameUrl"), readStringPath(data, "result.first_frame_url")),
+		LastFrameURL:    firstNonEmpty(readStringPath(data, "last_frame_url"), readStringPath(data, "lastFrameUrl"), readStringPath(data, "tail_frame_url"), readStringPath(data, "end_frame_url"), readStringPath(data, "content.last_frame_url"), readStringPath(data, "content.lastFrameUrl"), readStringPath(data, "content.tail_frame_url"), readStringPath(data, "result.last_frame_url")),
 		Error:           firstNonEmpty(readStringPath(data, "error.message"), readStringPath(data, "error")),
 		ErrorDetail:     "",
 	}

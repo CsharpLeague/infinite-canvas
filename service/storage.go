@@ -19,10 +19,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tigerowo/infinite-canvas/model"
-	"github.com/tigerowo/infinite-canvas/repository"
 	"github.com/google/uuid"
 	"github.com/robfig/cron/v3"
+	"github.com/tigerowo/infinite-canvas/model"
+	"github.com/tigerowo/infinite-canvas/repository"
 	"gorm.io/gorm"
 )
 
@@ -52,6 +52,7 @@ type StorageCapacityResult struct {
 }
 
 const defaultStorageCapacityLimitBytes int64 = 9 * 1024 * 1024 * 1024
+const maxRemoteStorageObjectBytes int64 = 512 * 1024 * 1024
 
 var (
 	storageCapacityCron *cron.Cron
@@ -165,6 +166,35 @@ func SaveCurrentUserStorageProvider(ctx context.Context, provider StorageObjectP
 // UploadStorageObject 上传对象到存储。
 func UploadStorageObject(ctx context.Context, filename string, contentType string, data []byte) (UploadedStorageObject, error) {
 	return UploadStorageObjectWithProvider(ctx, filename, contentType, data, nil)
+}
+
+// UploadRemoteStorageObject 下载远程生成结果并转存到当前用户可用的云存储。
+func UploadRemoteStorageObject(ctx context.Context, sourceURL string, filename string) (UploadedStorageObject, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimSpace(sourceURL), nil)
+	if err != nil {
+		return UploadedStorageObject{}, err
+	}
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		return UploadedStorageObject{}, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
+		return UploadedStorageObject{}, fmt.Errorf("生成结果下载失败: %s %s", response.Status, string(body))
+	}
+	data, err := io.ReadAll(io.LimitReader(response.Body, maxRemoteStorageObjectBytes+1))
+	if err != nil {
+		return UploadedStorageObject{}, err
+	}
+	if int64(len(data)) > maxRemoteStorageObjectBytes {
+		return UploadedStorageObject{}, errors.New("生成结果超过 512MB，无法上传云存储")
+	}
+	contentType := strings.TrimSpace(strings.Split(response.Header.Get("Content-Type"), ";")[0])
+	if contentType == "" || contentType == "application/octet-stream" {
+		contentType = http.DetectContentType(data)
+	}
+	return UploadStorageObject(ctx, filename, contentType, data)
 }
 
 // UploadStorageObjectWithProvider 上传对象到存储（可选用户自定义 Provider）。

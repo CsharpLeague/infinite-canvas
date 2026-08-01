@@ -62,6 +62,9 @@ func New() *gin.Engine {
 		handler.DeleteUserVideoTask(c.Writer, c.Request, c.Param("id"))
 	})
 	v1.POST("/media/references", gin.WrapF(handler.UploadReferenceMedia))
+	v1.POST("/virtual-portraits", gin.WrapF(handler.CreateVirtualPortrait))
+	v1.GET("/virtual-portraits/:id", func(c *gin.Context) { handler.GetVirtualPortrait(c.Writer, c.Request, c.Param("id")) })
+	v1.DELETE("/virtual-portraits/:id", func(c *gin.Context) { handler.DeleteVirtualPortrait(c.Writer, c.Request, c.Param("id")) })
 	v1.GET("/videos/:id", func(c *gin.Context) {
 		handler.AIVideo(c.Writer, c.Request, c.Param("id"))
 	})

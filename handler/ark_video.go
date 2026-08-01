@@ -23,7 +23,11 @@ func normalizeArkSeedanceVideoBody(body []byte, contentType string, modelName st
 			return nil, "", fmt.Errorf("解析火山方舟视频请求失败: %w", err)
 		}
 		if _, ok := payload["content"]; ok {
-			return body, "application/json", nil
+			if _, configured := payload["return_last_frame"]; !configured {
+				payload["return_last_frame"] = true
+			}
+			result, err := json.Marshal(payload)
+			return result, "application/json", err
 		}
 		model := firstNonEmpty(jsonString(payload["model"]), modelName)
 		return marshalArkSeedancePayload(model, jsonString(payload["prompt"]), jsonString(payload["size"]),
@@ -76,7 +80,7 @@ func marshalArkSeedancePayload(modelName, prompt, ratio, resolution, duration st
 	content := make([]map[string]any, 0, len(media)+1)
 	content = append(content, map[string]any{"type": "text", "text": prompt})
 	content = append(content, media...)
-	payload := map[string]any{"model": modelName, "content": content}
+	payload := map[string]any{"model": modelName, "content": content, "return_last_frame": true}
 	if generateAudio != nil {
 		payload["generate_audio"] = *generateAudio
 	}

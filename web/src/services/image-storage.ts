@@ -3,7 +3,7 @@
 import localforage from "localforage";
 
 import { nanoid } from "nanoid";
-import { readImageMeta } from "@/lib/image-utils";
+import { compressImageDataUrl, readImageMeta } from "@/lib/image-utils";
 import { apiGet } from "@/services/api/request";
 import { useUserStore } from "@/stores/use-user-store";
 
@@ -166,7 +166,7 @@ export async function resolveImageUrl(storageKey?: string, fallback = "") {
     if (!storageKey) return fallback;
     if (storageKey.startsWith("server:")) {
         const id = storageKey.slice("server:".length);
-        if (fallback && !fallback.startsWith("blob:")) return fallback;
+        if (fallback.startsWith("http://") || fallback.startsWith("https://")) return fallback;
         const cached = objectUrls.get(storageKey);
         if (cached) return cached;
         const blob = await store.getItem<Blob>(storageKey).catch(() => null);
@@ -266,7 +266,24 @@ export async function imageToDataUrl(image: { url?: string; dataUrl?: string; st
     throw new Error(lastError || "读取参考图失败");
 }
 
-export async function deleteStoredImages(keys: Iterable<string>) {
+export async function imageToVisionInputUrl(image: { url?: string; dataUrl?: string; storageKey?: string }) {
+    const fallback = image.url || image.dataUrl || "";
+    const resolved = await resolveImageUrl(image.storageKey, fallback);
+    for (const candidate of [image.dataUrl, image.url, resolved]) {
+        if (!candidate || candidate.startsWith("data:") || candidate.startsWith("blob:")) continue;
+        try {
+            const url = new URL(candidate, window.location.origin);
+            if ((url.protocol === "http:" || url.protocol === "https:") && !isLocalNetworkHost(url.hostname)) {
+                return url.href;
+            }
+        } catch {
+            // Fall back to a compact data URL below.
+        }
+    }
+    return compressImageDataUrl(await imageToDataUrl(image));
+}
+
+export async function deleteStoredImages(keys: Iterable<string>, options: { force?: boolean } = {}) {
     const { useAssetStore } = await import("@/stores/use-asset-store");
     const assetKeys = new Set(
         useAssetStore.getState().assets
@@ -275,7 +292,7 @@ export async function deleteStoredImages(keys: Iterable<string>) {
     );
     await Promise.all(
         Array.from(new Set(keys)).map(async (key) => {
-            if (assetKeys.has(key)) return;
+            if (!options.force && assetKeys.has(key)) return;
             if (key.startsWith("server:")) {
                 await deleteServerImage(key);
                 return;

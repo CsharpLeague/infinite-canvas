@@ -9,6 +9,7 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes, formatDuration } from "@/lib/image-utils";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasResourceMentionTextarea } from "./canvas-resource-mention-textarea";
+import { CanvasMediaPlayer } from "./canvas-media-player";
 import { CanvasNodeType, type CanvasNodeData, type Position } from "../types";
 import { isCanvasImageNodeType } from "../utils/canvas-panorama";
 import type { CanvasResourceReference } from "../utils/canvas-resource-references";
@@ -672,7 +673,7 @@ function VideoNodeContent({ node, theme }: NodeContentRendererProps) {
                 <span className="text-sm">空视频节点</span>
             </div>
         );
-    return <video src={node.metadata.content} controls className="h-full w-full rounded-[18px] bg-black object-contain" data-canvas-no-zoom />;
+    return <CanvasMediaPlayer src={node.metadata.content} kind="video" title={node.title} />;
 }
 
 function AudioNodeContent({ node, theme }: NodeContentRendererProps) {
@@ -689,7 +690,7 @@ function AudioNodeContent({ node, theme }: NodeContentRendererProps) {
                 <Music2 className="size-4 shrink-0" />
                 <span className="truncate">{node.title || "音频"}</span>
             </div>
-            <audio src={node.metadata.content} controls className="w-full" data-canvas-no-zoom />
+            <CanvasMediaPlayer src={node.metadata.content} kind="audio" title={node.title} surface={theme.node.fill} textColor={theme.node.text} borderColor={theme.node.stroke} />
         </div>
     );
 }

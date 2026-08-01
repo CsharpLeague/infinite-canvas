@@ -31,14 +31,15 @@ func TestNormalizeArkSeedanceVideoMultipart(t *testing.T) {
 		t.Fatalf("unexpected content type: %s", contentType)
 	}
 	var payload struct {
-		Model         string           `json:"model"`
-		GenerateAudio bool             `json:"generate_audio"`
-		Content       []map[string]any `json:"content"`
+		Model           string           `json:"model"`
+		GenerateAudio   bool             `json:"generate_audio"`
+		ReturnLastFrame bool             `json:"return_last_frame"`
+		Content         []map[string]any `json:"content"`
 	}
 	if err := json.Unmarshal(result, &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload.Model != "doubao-seedance-1-5-pro-250528" || !payload.GenerateAudio {
+	if payload.Model != "doubao-seedance-1-5-pro-250528" || !payload.GenerateAudio || !payload.ReturnLastFrame {
 		t.Fatalf("unexpected payload: %s", result)
 	}
 	if payload.Content[0]["text"] != "海边日落 --ratio 16:9 --resolution 720p --dur 5" {
@@ -55,15 +56,16 @@ func TestNormalizeArkSeedanceOfficialJSONPassThrough(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(result) != string(body) || contentType != "application/json" {
+	var payload map[string]any
+	if json.Unmarshal(result, &payload) != nil || payload["return_last_frame"] != true || contentType != "application/json" {
 		t.Fatalf("official payload changed: %s", result)
 	}
 }
 
 func TestParseArkSeedanceVideoURL(t *testing.T) {
-	payload := []byte(`{"id":"cgt-123","status":"succeeded","content":{"video_url":"https://example.com/video.mp4"},"duration":4}`)
+	payload := []byte(`{"id":"cgt-123","status":"succeeded","content":{"video_url":"https://example.com/video.mp4","last_frame_url":"https://example.com/last.png"},"duration":4}`)
 	result := parseVideoTaskPayload(payload, "doubao-seedance-2-0-fast")
-	if result.Status != "completed" || result.VideoURL != "https://example.com/video.mp4" {
+	if result.Status != "completed" || result.VideoURL != "https://example.com/video.mp4" || result.LastFrameURL != "https://example.com/last.png" {
 		t.Fatalf("unexpected parsed result: %+v", result)
 	}
 }

@@ -69,6 +69,11 @@ export type CanvasNodeMetadata = {
     primaryImageId?: string;
     imageBatchExpanded?: boolean;
     storageKey?: string;
+    arkAssetId?: string;
+    arkChannelId?: string;
+    virtualPortraitTaskId?: string;
+    virtualPortraitStatus?: "processing" | "active" | "failed";
+    virtualPortraitError?: string;
     mimeType?: string;
     bytes?: number;
     durationMs?: number;
@@ -76,12 +81,18 @@ export type CanvasNodeMetadata = {
     progress?: number;
     imageTaskId?: string;
     imageTaskResultId?: string;
+    storagePending?: boolean;
     audioTaskId?: string;
     audioTaskResultId?: string;
     videoTaskId?: string;
     videoTaskVideoId?: string;
+    firstFrameUrl?: string;
+    firstFrameStorageKey?: string;
+    lastFrameUrl?: string;
+    lastFrameStorageKey?: string;
     firstFrameNodeId?: string;
     lastFrameNodeId?: string;
+    videoReferenceModes?: Record<string, "tail_frame" | "video">;
     multiShot?: string;
     shotType?: string;
     klingImageNodeIds?: string[];
@@ -138,6 +149,8 @@ export type CanvasAssistantImage = {
     storageKey?: string;
     prompt: string;
     source?: "asset" | "library";
+    arkAssetId?: string;
+    arkChannelId?: string;
 };
 
 export type CanvasAssistantMessage = {

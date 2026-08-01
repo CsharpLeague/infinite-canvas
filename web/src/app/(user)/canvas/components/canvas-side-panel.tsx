@@ -1,9 +1,9 @@
 "use client";
 
 import { memo, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { Empty, Input, Pagination, Select, Spin } from "antd";
+import { App, Empty, Input, Pagination, Select, Spin } from "antd";
 import { useQuery } from "@tanstack/react-query";
-import { BookOpen, ChevronRight, Clapperboard, Eye, FileText, Group, Image as ImageIcon, Music2, Plus, Search, Settings2, Type, Video } from "lucide-react";
+import { BookOpen, ChevronRight, Clapperboard, Eye, FileText, Group, Image as ImageIcon, Music2, Plus, Search, Settings2, Trash2, Type, Video } from "lucide-react";
 import { motion } from "motion/react";
 
 import { AssetFormModal } from "@/components/assets/asset-form-modal";
@@ -13,6 +13,9 @@ import { canvasThemes, type CanvasTheme } from "@/lib/canvas-theme";
 import { cn } from "@/lib/utils";
 import { fetchAssetLibrary, type AssetLibraryItem } from "@/services/api/assets";
 import { fetchPrompts, type Prompt } from "@/services/api/prompts";
+import { createVirtualPortrait, deleteVirtualPortrait, fetchVirtualPortrait } from "@/services/api/virtual-portrait";
+import { deleteStoredImages, resolveImageUrl, uploadImage } from "@/services/image-storage";
+import { useEffectiveConfig } from "@/stores/use-config-store";
 import { useAssetStore, type Asset } from "@/stores/use-asset-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 
@@ -78,6 +81,7 @@ const NODE_FILTER_OPTIONS = [
 ];
 
 const ASSET_TYPE_OPTIONS = [
+    { label: "虚拟人像", value: "virtual_portrait" },
     { label: "全部", value: "" },
     { label: "文本", value: "text" },
     { label: "图片", value: "image" },
@@ -262,7 +266,7 @@ const CanvasAssetsTab = memo(function CanvasAssetsTab({ theme, onAssetDragStart,
 
 function AssetSourceTab({ label, active, theme, onClick }: { label: string; active: boolean; theme: CanvasTheme; onClick: () => void }) {
     return (
-        <button type="button" onClick={onClick} className="relative pb-1 text-xs font-semibold transition-opacity" style={{ color: theme.node.text, opacity: active ? 1 : 0.45 }}>
+        <button type="button" onClick={onClick} className="relative shrink-0 whitespace-nowrap pb-1 text-xs font-semibold transition-opacity" style={{ color: theme.node.text, opacity: active ? 1 : 0.45 }}>
             {label}
             {active ? <span className="absolute inset-x-0 -bottom-px h-0.5 rounded-full" style={{ background: theme.toolbar.activeText }} /> : null}
         </button>
@@ -270,25 +274,64 @@ function AssetSourceTab({ label, active, theme, onClick }: { label: string; acti
 }
 
 function MyAssetsTab({ theme, onAdd, onAssetDragStart, onAssetDragEnd }: { theme: CanvasTheme; onAdd: () => void; onAssetDragStart: (payload: InsertAssetPayload) => void; onAssetDragEnd: () => void }) {
+    const { message } = App.useApp();
     const assets = useAssetStore((state) => state.assets);
+    const addAsset = useAssetStore((state) => state.addAsset);
+    const updateAsset = useAssetStore((state) => state.updateAsset);
+    const config = useEffectiveConfig();
+    const portraitInputRef = useRef<HTMLInputElement>(null);
+    const [uploadingPortrait, setUploadingPortrait] = useState(false);
     const [keyword, setKeyword] = useState("");
     const [type, setType] = useState("");
     const filtered = useMemo(() => {
         const query = keyword.trim().toLowerCase();
-        return assets.filter((asset) => (!type || asset.kind === type) && (!query || [asset.title, ...(asset.tags || [])].join(" ").toLowerCase().includes(query)));
+        return assets.filter((asset) => (!type || (type === "virtual_portrait" ? asset.metadata?.type === "virtual_portrait" : asset.kind === type)) && (!query || [asset.title, ...(asset.tags || [])].join(" ").toLowerCase().includes(query)));
     }, [assets, keyword, type]);
+    const portraitChannels = config.publicChannels.filter((channel) => channel.enabled !== false && channel.virtualPortraitEnabled);
+    const portraitChannel = portraitChannels.find((channel) => channel.id === config.videoChannelId) || portraitChannels[0];
+
+    const uploadPortrait = async (file?: File) => {
+        if (!file) return;
+        if (!portraitChannel?.id) return message.error("请先在火山渠道中配置素材 Access Key ID 和 Secret Access Key");
+        setUploadingPortrait(true);
+        try {
+            const image = await uploadImage(file);
+            const assetId = addAsset({ kind: "image", title: file.name, coverUrl: image.url, tags: [], source: "虚拟人像", data: { dataUrl: image.url, storageKey: image.storageKey, width: image.width, height: image.height, bytes: image.bytes, mimeType: image.mimeType }, metadata: { source: "virtual_portrait_upload" } });
+            const task = await createVirtualPortrait(portraitChannel.id, image.url, file.name);
+            updateAsset(assetId, { metadata: portraitMetadata(task) });
+            setType("virtual_portrait");
+            message.success(task.status === "active" ? "虚拟人像已入库" : "已上传并提交虚拟人像审核");
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "虚拟人像上传失败");
+        } finally {
+            setUploadingPortrait(false);
+            if (portraitInputRef.current) portraitInputRef.current.value = "";
+        }
+    };
+
+    useEffect(() => {
+        const processing = assets.filter((asset) => asset.kind === "image" && asset.metadata?.type === "virtual_portrait" && asset.metadata.status === "processing");
+        if (!processing.length) return;
+        const refresh = () => processing.forEach((asset) => {
+            const taskId = typeof asset.metadata?.taskId === "string" ? asset.metadata.taskId : "";
+            if (taskId) void fetchVirtualPortrait(taskId).then((task) => updateAsset(asset.id, { metadata: portraitMetadata(task) })).catch(() => {});
+        });
+        const timer = window.setInterval(refresh, 5000);
+        return () => window.clearInterval(timer);
+    }, [assets, updateAsset]);
 
     return (
         <>
-            <div className="flex items-center gap-4 px-3 pb-2">
+            <div className="flex items-center gap-3 overflow-x-auto px-3 pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                 {ASSET_TYPE_OPTIONS.map((option) => <AssetSourceTab key={option.value || "all"} label={option.label} active={type === option.value} theme={theme} onClick={() => setType(option.value)} />)}
             </div>
             <div className="flex items-center gap-2 px-3 pb-2">
                 <Input size="small" allowClear prefix={<Search className="size-3.5 text-stone-400" />} placeholder="搜索素材" value={keyword} onChange={(event) => setKeyword(event.target.value)} />
-                <button type="button" onClick={onAdd} className="flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold transition hover:bg-black/5 dark:hover:bg-white/10" style={{ color: theme.node.text }}>
+                <button type="button" disabled={uploadingPortrait} onClick={() => type === "virtual_portrait" ? portraitInputRef.current?.click() : onAdd()} className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md px-2 py-1 text-xs font-semibold transition hover:bg-black/5 disabled:opacity-50 dark:hover:bg-white/10" style={{ color: theme.node.text }}>
                     <Plus className="size-3.5" />
-                    添加
+                    {type === "virtual_portrait" ? uploadingPortrait ? "上传中" : "上传人像" : "添加"}
                 </button>
+                <input ref={portraitInputRef} type="file" accept="image/*" hidden onChange={(event) => void uploadPortrait(event.target.files?.[0])} />
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
                 {filtered.length ? <div className="grid grid-cols-2 gap-2 px-1 pt-1">{filtered.map((asset) => <AssetDragCard key={asset.id} asset={asset} theme={theme} onAssetDragStart={onAssetDragStart} onAssetDragEnd={onAssetDragEnd} />)}</div> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无素材" className="pt-16" />}
@@ -325,7 +368,37 @@ function LibraryAssetsTab({ theme, onAssetDragStart, onAssetDragEnd }: { theme: 
 }
 
 function AssetDragCard({ asset, theme, onAssetDragStart, onAssetDragEnd }: { asset: Asset; theme: CanvasTheme; onAssetDragStart: (payload: InsertAssetPayload) => void; onAssetDragEnd: () => void }) {
-    return <DraggableAssetCard theme={theme} title={asset.title} payload={assetPayload(asset)} kind={asset.kind} imageUrl={asset.kind === "text" ? asset.coverUrl : asset.kind === "image" ? asset.coverUrl || asset.data.dataUrl : asset.kind === "video" ? asset.coverUrl || asset.data.url : ""} text={asset.kind === "text" ? asset.data.content : ""} onAssetDragStart={onAssetDragStart} onAssetDragEnd={onAssetDragEnd} />;
+    const { message, modal } = App.useApp();
+    const updateAsset = useAssetStore((state) => state.updateAsset);
+    const removeAsset = useAssetStore((state) => state.removeAsset);
+    const config = useEffectiveConfig();
+    const channels = config.publicChannels.filter((channel) => channel.enabled !== false && channel.virtualPortraitEnabled);
+    const channel = channels.find((item) => item.id === config.videoChannelId) || channels[0];
+    const portrait = asset.metadata?.type === "virtual_portrait" ? asset.metadata : null;
+    const label = portrait?.status === "active" ? "虚拟人像" : portrait?.status === "failed" ? "审核失败" : portrait?.status === "processing" ? "处理中" : "入库为虚拟人像";
+    const enroll = async () => {
+        if (asset.kind !== "image" || !channel?.id || (portrait && portrait.status !== "failed")) return;
+        try {
+            const sourceUrl = await resolveImageUrl(asset.data.storageKey, asset.data.dataUrl || asset.coverUrl);
+            const task = await createVirtualPortrait(channel.id, sourceUrl, asset.title);
+            updateAsset(asset.id, { metadata: portraitMetadata(task) });
+            message.success(task.status === "active" ? "该虚拟人像已经入库" : "已提交虚拟人像入库，请等待审核");
+        } catch (error) { message.error(error instanceof Error ? error.message : "虚拟人像入库失败"); }
+    };
+    const remove = () => modal.confirm({
+        title: "删除素材",
+        content: portrait ? "删除后将同时移除火山虚拟人像、任务记录和云存储文件，画布中的现有引用也会失效。确定继续吗？" : `确定删除「${asset.title}」吗？`,
+        okText: "删除",
+        okButtonProps: { danger: true },
+        cancelText: "取消",
+        async onOk() {
+            if (portrait && typeof portrait.taskId === "string") await deleteVirtualPortrait(portrait.taskId);
+            if (portrait && asset.kind === "image" && asset.data.storageKey) await deleteStoredImages([asset.data.storageKey], { force: true });
+            removeAsset(asset.id);
+            message.success("素材已删除");
+        },
+    });
+    return <div className="group relative"><DraggableAssetCard theme={theme} title={asset.title} payload={assetPayload(asset)} kind={asset.kind} imageUrl={asset.kind === "text" ? asset.coverUrl : asset.kind === "image" ? asset.coverUrl || asset.data.dataUrl : asset.kind === "video" ? asset.coverUrl || asset.data.url : ""} text={asset.kind === "text" ? asset.data.content : ""} onAssetDragStart={onAssetDragStart} onAssetDragEnd={onAssetDragEnd} /><button type="button" draggable={false} title="删除素材" className="absolute right-1.5 top-1.5 flex size-7 items-center justify-center rounded-md bg-black/65 text-white opacity-0 backdrop-blur-md transition hover:bg-red-600 group-hover:opacity-100" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); remove(); }}><Trash2 className="size-3.5" /></button>{asset.kind === "image" && (channel || portrait) ? <button type="button" draggable={false} title={typeof portrait?.error === "string" ? portrait.error : label} className="absolute bottom-1.5 left-1.5 right-1.5 truncate rounded-md px-2 py-1 text-[10px] font-semibold backdrop-blur-md" style={{ background: portrait?.status === "failed" ? "rgba(190,24,93,.82)" : "rgba(15,23,42,.76)", color: "white" }} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); void enroll(); }}>{label}</button> : null}</div>;
 }
 
 function LibraryAssetDragCard({ asset, theme, onAssetDragStart, onAssetDragEnd }: { asset: AssetLibraryItem; theme: CanvasTheme; onAssetDragStart: (payload: InsertAssetPayload) => void; onAssetDragEnd: () => void }) {
@@ -353,7 +426,10 @@ function DraggableAssetCard({ theme, title, payload, kind, imageUrl, text, onAss
 
 function assetPayload(asset: Asset): InsertAssetPayload {
     if (asset.kind === "text") return { kind: "text", content: asset.data.content, title: asset.title, assetId: asset.id, source: "asset" };
-    if (asset.kind === "image") return { kind: "image", dataUrl: asset.data.dataUrl, storageKey: asset.data.storageKey, title: asset.title, assetId: asset.id, width: asset.data.width, height: asset.data.height, bytes: asset.data.bytes, mimeType: asset.data.mimeType, source: "asset" };
+    if (asset.kind === "image") {
+        const portrait = asset.metadata?.type === "virtual_portrait" && asset.metadata.status === "active" ? asset.metadata : null;
+        return { kind: "image", dataUrl: asset.data.dataUrl || asset.coverUrl, storageKey: asset.data.storageKey, title: asset.title, assetId: asset.id, width: asset.data.width, height: asset.data.height, bytes: asset.data.bytes, mimeType: asset.data.mimeType, source: "asset", arkAssetId: typeof portrait?.assetId === "string" ? portrait.assetId : undefined, arkChannelId: typeof portrait?.channelId === "string" ? portrait.channelId : undefined };
+    }
     if (asset.kind === "video") return { kind: "video", url: asset.data.url, storageKey: asset.data.storageKey, title: asset.title, assetId: asset.id, width: asset.data.width, height: asset.data.height, bytes: asset.data.bytes, mimeType: asset.data.mimeType, source: "asset" };
     return { kind: "audio", url: asset.data.url, storageKey: asset.data.storageKey, title: asset.title, assetId: asset.id, bytes: asset.data.bytes, mimeType: asset.data.mimeType, durationMs: asset.data.durationMs, source: "asset" };
 }
@@ -363,6 +439,10 @@ function libraryPayload(asset: AssetLibraryItem): InsertAssetPayload {
     if (asset.type === "image") return { kind: "image", dataUrl: asset.url, title: asset.title, assetId: asset.id, source: "library" };
     if (asset.type === "video") return { kind: "video", url: asset.url, title: asset.title, assetId: asset.id, source: "library" };
     return { kind: "audio", url: asset.url, title: asset.title, assetId: asset.id, source: "library" };
+}
+
+function portraitMetadata(task: { id: string; channelId: string; groupId: string; assetId: string; status: "processing" | "active" | "failed"; error: string; sourceFingerprint: string }) {
+    return { type: "virtual_portrait", taskId: task.id, channelId: task.channelId, groupId: task.groupId, assetId: task.assetId, status: task.status, error: task.error, sourceFingerprint: task.sourceFingerprint } as const;
 }
 
 const CanvasPromptsTab = memo(function CanvasPromptsTab({ theme, onInsert }: { theme: CanvasTheme; onInsert: (payload: InsertAssetPayload) => void }) {

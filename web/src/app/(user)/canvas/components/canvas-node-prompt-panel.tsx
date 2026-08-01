@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ArrowUp, LoaderCircle } from "lucide-react";
-import { Button } from "antd";
+import { ArrowUp, FileText, Image as ImageIcon, LoaderCircle, Music2, Plus, Video, X } from "lucide-react";
+import { Button, Popover } from "antd";
 
 import { ModelPicker } from "@/components/model-picker";
 import { defaultConfig, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
@@ -33,9 +33,13 @@ type CanvasNodePromptPanelProps = {
     videoFrameOptions?: CanvasVideoFrameOption[];
     videoResourceOptions?: CanvasVideoResourceOption[];
     onImageSettingsOpenChange?: (open: boolean) => void;
+    onFocusReference?: (nodeId: string) => void;
+    availableReferences?: CanvasResourceReference[];
+    onAddReference?: (nodeId: string) => void;
+    onRemoveReference?: (nodeId: string) => void;
 };
 
-export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfigChange, onGenerate, mentionReferences = [], videoFrameOptions = [], videoResourceOptions = [], onImageSettingsOpenChange }: CanvasNodePromptPanelProps) {
+export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfigChange, onGenerate, mentionReferences = [], videoFrameOptions = [], videoResourceOptions = [], onImageSettingsOpenChange, onFocusReference, availableReferences = [], onAddReference, onRemoveReference }: CanvasNodePromptPanelProps) {
     const globalConfig = useEffectiveConfig();
     const modelCosts = useConfigStore((state) => state.publicSettings?.modelChannel.modelCosts);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
@@ -48,6 +52,8 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const sourcePrompt = isPanorama ? node.metadata?.panoramaSourcePrompt || "" : node.metadata?.prompt || "";
     const [prompt, setPrompt] = useState(sourcePrompt);
     const credits = requestCreditCost({ channelMode: config.channelMode, modelCosts, model: config.model, count: mode === "image" ? config.count : 1 });
+    const connectedReferenceNodeIds = new Set(mentionReferences.map((reference) => reference.nodeId));
+    const addableReferences = availableReferences.filter((reference) => reference.nodeId !== node.id && !connectedReferenceNodeIds.has(reference.nodeId));
 
     useEffect(() => {
         setPrompt(sourcePrompt);
@@ -85,6 +91,109 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                 style={{ background: "transparent", color: theme.node.text }}
                 placeholder={isPanorama ? "描述想生成的全景，或上传/连接图片作为参考" : promptPlaceholder(mode, hasImageContent, hasTextContent)}
             />
+
+            {mentionReferences.length || addableReferences.length ? (
+                <div className="mt-2 flex items-center gap-2 overflow-x-auto pb-1">
+                    {mentionReferences.map((reference) => {
+                        const videoMode = reference.kind === "video"
+                            ? node.metadata?.videoReferenceModes?.[reference.nodeId] || (reference.lastFrameUrl ? "tail_frame" : "video")
+                            : null;
+                        const displayReference = videoMode === "tail_frame" && reference.lastFrameUrl
+                            ? { ...reference, kind: "image" as const, previewUrl: reference.lastFrameUrl }
+                            : reference;
+                        const role = videoMode === "tail_frame"
+                            ? `${reference.label} · 尾帧`
+                            : videoMode === "video"
+                                ? `${reference.label} · 视频`
+                                : node.metadata?.firstFrameNodeId === reference.nodeId
+                                    ? "首帧"
+                                    : node.metadata?.lastFrameNodeId === reference.nodeId
+                                        ? "尾帧"
+                                        : reference.label;
+                        return (
+                            <Popover key={reference.nodeId} mouseEnterDelay={0.25} content={<ReferencePreview reference={displayReference} />} placement="top">
+                                <button
+                                    type="button"
+                                    className="group relative h-12 w-14 shrink-0 overflow-hidden rounded-[10px] border transition hover:-translate-y-0.5"
+                                    style={{ borderColor: theme.toolbar.border, background: theme.toolbar.panel, borderRadius: 10 }}
+                                    onClick={() => onFocusReference?.(reference.nodeId)}
+                                    aria-label={`定位${role}`}
+                                >
+                                    <ReferenceThumbnail reference={displayReference} />
+                                    <span className="absolute inset-x-0 bottom-0 truncate bg-black/65 px-1 py-0.5 text-[9px] text-white">{role}</span>
+                                    {reference.kind === "video" && reference.lastFrameUrl ? (
+                                        <span
+                                            role="button"
+                                            tabIndex={0}
+                                            className="absolute left-0.5 top-0.5 rounded-md bg-black/70 px-1 py-0.5 text-[8px] leading-none text-white opacity-80 transition hover:opacity-100"
+                                            onClick={(event) => {
+                                                event.stopPropagation();
+                                                onConfigChange(node.id, {
+                                                    videoReferenceModes: {
+                                                        ...node.metadata?.videoReferenceModes,
+                                                        [reference.nodeId]: videoMode === "tail_frame" ? "video" : "tail_frame",
+                                                    },
+                                                });
+                                            }}
+                                            onKeyDown={(event) => {
+                                                if (event.key !== "Enter" && event.key !== " ") return;
+                                                event.preventDefault();
+                                                event.stopPropagation();
+                                                onConfigChange(node.id, {
+                                                    videoReferenceModes: {
+                                                        ...node.metadata?.videoReferenceModes,
+                                                        [reference.nodeId]: videoMode === "tail_frame" ? "video" : "tail_frame",
+                                                    },
+                                                });
+                                            }}
+                                            aria-label={`切换为${videoMode === "tail_frame" ? "视频参考" : "尾帧参考"}`}
+                                            title={`点击切换为${videoMode === "tail_frame" ? "视频参考" : "尾帧参考"}`}
+                                        >
+                                            {videoMode === "tail_frame" ? "尾帧" : "视频"}
+                                        </span>
+                                    ) : null}
+                                    <span
+                                        role="button"
+                                        tabIndex={0}
+                                        className="absolute right-0.5 top-0.5 hidden size-4 items-center justify-center rounded-full bg-black/70 text-white group-hover:flex"
+                                        onClick={(event) => {
+                                            event.stopPropagation();
+                                            onRemoveReference?.(reference.nodeId);
+                                        }}
+                                        onKeyDown={(event) => {
+                                            if (event.key !== "Enter" && event.key !== " ") return;
+                                            event.preventDefault();
+                                            event.stopPropagation();
+                                            onRemoveReference?.(reference.nodeId);
+                                        }}
+                                        aria-label="删除参考连线"
+                                    >
+                                        <X className="size-2.5" />
+                                    </span>
+                                </button>
+                            </Popover>
+                        );
+                    })}
+                    <Popover
+                        trigger="click"
+                        placement="topLeft"
+                        content={
+                            <div className="thin-scrollbar max-h-56 w-56 overflow-y-auto p-1">
+                                {addableReferences.length ? addableReferences.map((reference) => (
+                                    <button key={reference.nodeId} type="button" className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition hover:opacity-70" onClick={() => onAddReference?.(reference.nodeId)}>
+                                        <span className="relative size-9 shrink-0 overflow-hidden rounded-md"><ReferenceThumbnail reference={reference} /></span>
+                                        <span className="min-w-0"><span className="block truncate font-medium">{reference.title}</span><span className="block opacity-55">{reference.kind === "image" ? "图片" : reference.kind === "video" ? "视频" : reference.kind === "audio" ? "音频" : "文本"}</span></span>
+                                    </button>
+                                )) : <div className="px-2 py-3 text-center text-xs opacity-55">没有可添加的素材节点</div>}
+                            </div>
+                        }
+                    >
+                        <button type="button" className="flex h-12 w-14 shrink-0 items-center justify-center rounded-[10px] border border-dashed opacity-55 transition hover:-translate-y-0.5 hover:opacity-100" style={{ borderColor: theme.toolbar.border, borderRadius: 10 }} aria-label="添加参考素材">
+                            <Plus className="size-4" />
+                        </button>
+                    </Popover>
+                </div>
+            ) : null}
 
             <div className="mt-2 flex min-w-0 items-center justify-between gap-2">
                 <div className="flex min-w-0 items-center gap-2">
@@ -139,6 +248,19 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     );
 }
 
+function ReferenceThumbnail({ reference }: { reference: CanvasResourceReference }) {
+    if (reference.kind === "image" && reference.previewUrl) return <img src={reference.previewUrl} alt="" className="size-full rounded-[10px] object-cover" style={{ borderRadius: 10 }} />;
+    if (reference.kind === "video" && reference.previewUrl) return <video src={reference.previewUrl} className="size-full rounded-[10px] bg-black object-cover" style={{ borderRadius: 10 }} muted preload="metadata" />;
+    const Icon = reference.kind === "audio" ? Music2 : reference.kind === "video" ? Video : reference.kind === "image" ? ImageIcon : FileText;
+    return <Icon className="absolute left-1/2 top-1/2 size-5 -translate-x-1/2 -translate-y-1/2 opacity-65" />;
+}
+
+function ReferencePreview({ reference }: { reference: CanvasResourceReference }) {
+    if (reference.kind === "image" && reference.previewUrl) return <img src={reference.previewUrl} alt={reference.title} className="max-h-64 max-w-64 rounded-lg object-contain" />;
+    if (reference.kind === "video" && reference.previewUrl) return <video src={reference.previewUrl} className="max-h-64 max-w-64 rounded-lg bg-black" controls preload="metadata" />;
+    return <div className="max-w-64 whitespace-pre-wrap text-xs">{reference.text || reference.title}</div>;
+}
+
 function defaultMode(type: CanvasNodeData["type"]): CanvasNodeGenerationMode {
     return type === CanvasNodeType.Text ? "text" : type === CanvasNodeType.Video ? "video" : type === CanvasNodeType.Audio ? "audio" : "image";
 }
@@ -167,7 +289,7 @@ function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: Can
         videoNegativePrompt: node.metadata?.negativePrompt || globalConfig.videoNegativePrompt || defaultConfig.videoNegativePrompt,
         videoMultiShot: node.metadata?.multiShot || globalConfig.videoMultiShot || defaultConfig.videoMultiShot,
         videoShotType: node.metadata?.shotType || globalConfig.videoShotType || defaultConfig.videoShotType,
-        videoGenerateAudio: node.metadata?.generateAudio || globalConfig.videoGenerateAudio || defaultConfig.videoGenerateAudio,
+        videoGenerateAudio: node.metadata?.generateAudio ?? defaultConfig.videoGenerateAudio,
         videoCharacterOrientation: node.metadata?.characterOrientation || globalConfig.videoCharacterOrientation || defaultConfig.videoCharacterOrientation,
         videoWatermark: node.metadata?.watermark || globalConfig.videoWatermark || defaultConfig.videoWatermark,
         audioVoice: node.metadata?.audioVoice || globalConfig.audioVoice || defaultConfig.audioVoice,

@@ -1,17 +1,18 @@
 import axios from "axios";
 
 import { dataUrlToFile } from "@/lib/image-utils";
+import { friendlyAIErrorMessage } from "@/lib/ai-error-message";
 import { boolConfig, isSeedanceVideoConfig, normalizeSeedanceRatio } from "@/lib/seedance-video";
 import { isKIEGrokVideoModel } from "@/components/video-settings-panel";
 import { modelKey, supportsVideoAudioGeneration } from "@/lib/video-model-capabilities";
-import { resolveMediaUrl } from "@/services/file-storage";
+import { resolveMediaUrl, uploadRemoteMediaToServer } from "@/services/file-storage";
 import { imageToDataUrl, resolveImageUrl } from "@/services/image-storage";
 import { buildApiUrl, channelIdForActiveModel, localChannelForActiveModel, type AiConfig, type VideoElementReference } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 
-export type VideoResponse = { id: string; task_id?: string; video_id?: string; source_id?: string; sourceId?: string; channelId?: string; userChannelId?: string; channelName?: string; channel_id?: string; user_channel_id?: string; channel_name?: string; status?: string; video_url?: string; url?: string; progress?: number; error?: { message?: string }; size?: string; seconds?: string; model?: string; created_at?: string | number; createdAt?: string | number; started_at?: string | number; startedAt?: string | number; request_body?: string };
+export type VideoResponse = { id: string; task_id?: string; video_id?: string; source_id?: string; sourceId?: string; channelId?: string; userChannelId?: string; channelName?: string; channel_id?: string; user_channel_id?: string; channel_name?: string; status?: string; video_url?: string; url?: string; storageKey?: string; first_frame_url?: string; firstFrameUrl?: string; firstFrameStorageKey?: string; last_frame_url?: string; lastFrameUrl?: string; lastFrameStorageKey?: string; mimeType?: string; bytes?: number; progress?: number; error?: { message?: string }; size?: string; seconds?: string; model?: string; created_at?: string | number; createdAt?: string | number; started_at?: string | number; startedAt?: string | number; request_body?: string };
 type ApiVideoEnvelope = { code: number; data?: VideoResponse | VideoResponse[] | null; msg?: string; message?: string };
 type ApiVideoResponse = VideoResponse | ApiVideoEnvelope;
 export type VideoGenerationResult = { id: string; url: string; durationMs: number; width: number; height: number; bytes: number; mimeType: string; task: VideoResponse };
@@ -24,7 +25,7 @@ export class VideoRequestError extends Error {
     detail?: string;
 
     constructor(message: string, detail?: unknown) {
-        super(message);
+        super(friendlyAIErrorMessage(message, "视频生成失败"));
         this.name = "VideoRequestError";
         this.detail = formatErrorDetail(detail);
     }
@@ -82,14 +83,33 @@ export async function requestVideoGeneration(config: AiConfig, prompt: string, r
     const legacyVideoReferences = Array.isArray(videoReferencesOrProgress) ? videoReferencesOrProgress : undefined;
     const onProgress = typeof videoReferencesOrProgress === "function" ? videoReferencesOrProgress : undefined;
     const input = legacyVideoReferences ? { references: Array.isArray(references) ? references : references.references || [], videoReferences: legacyVideoReferences, audioReferences } : references;
+    const normalizedInput = normalizeVideoReferenceInput(input);
+    const activeChannelId = channelIdForActiveModel(config);
+    const mismatchedPortrait = normalizedInput.references.find((image) => image.arkAssetId && image.arkChannelId && image.arkChannelId !== activeChannelId);
+    if (mismatchedPortrait) throw new VideoRequestError("虚拟人像所属火山渠道与当前视频渠道不一致，请切换到入库时使用的火山渠道");
     const created = await createVideoGenerationTask(config, prompt, input, onProgress ? (progress) => onProgress(progress) : undefined);
     return pollCreatedVideoGenerationTask(config, created.task, { startedAt: created.startedAt, requestBody: created.requestBody, onProgress: onProgress ? (progress) => onProgress(progress) : undefined });
 }
 
 export async function createVideoGenerationTask(config: AiConfig, prompt: string, references: ReferenceImage[] | VideoReferenceInput = [], onProgress?: VideoProgressHandler, options?: string | VideoTaskCreateOptions): Promise<CreatedVideoGenerationTask> {
     const model = config.model || config.videoModel;
+    const normalizedReferences = normalizeVideoReferenceInput(references);
+    const activeChannelId = channelIdForActiveModel(config);
+    if (normalizedReferences.references.some((image) => image.arkAssetId && image.arkChannelId && image.arkChannelId !== activeChannelId)) {
+        throw new VideoRequestError("虚拟人像所属火山渠道与当前视频渠道不一致，请切换到入库时使用的火山渠道");
+    }
+    if (
+        isSeedanceVideoConfig(config) &&
+        normalizedReferences.audioReferences.length > 0 &&
+        normalizedReferences.references.length === 0 &&
+        normalizedReferences.videoReferences.length === 0 &&
+        !normalizedReferences.firstFrame &&
+        !normalizedReferences.lastFrame
+    ) {
+        throw new VideoRequestError("火山方舟不支持仅使用参考音频，请同时连接至少一张参考图片或一段参考视频");
+    }
     const systemPrompt = (config.systemPrompts.video || config.systemPrompt).trim();
-    const body = await createVideoRequestBody(config, model, systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt, normalizeVideoReferenceInput(references));
+    const body = await createVideoRequestBody(config, model, systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt, normalizedReferences);
     const startedAt = Date.now();
     try {
         const createOptions = normalizeVideoTaskCreateOptions(options);
@@ -226,7 +246,7 @@ async function createVideoRequestBody(config: AiConfig, model: string, prompt: s
         else body.append("preset", "normal");
     }
     if (motionControl) body.append("character_orientation", normalizeCharacterOrientation(config.videoCharacterOrientation));
-    if (supportsVideoAudioGeneration(model)) body.append("video_generate_audio", String(boolConfig(config.videoGenerateAudio, false)));
+    if (supportsVideoAudioGeneration(model)) body.append("video_generate_audio", String(boolConfig(config.videoGenerateAudio, true)));
     const files = await Promise.all(input.references.slice(0, kling ? 2 : 9).map(imageReferenceToFormValue));
     files.forEach((file) => body.append("input_reference[]", file));
     if (!kling && input.firstFrame) body.append("first_frame_url", await imageReferenceToFormValue(input.firstFrame));
@@ -380,6 +400,8 @@ async function imageReferenceToFile(image: ReferenceImage) {
 }
 
 async function imageReferenceToFormValue(image: ReferenceImage) {
+    if (image.arkAssetId) return `asset://${image.arkAssetId}`;
+    if (image.dataUrl.startsWith("asset://")) return image.dataUrl;
     const resolvedUrl = await resolveImageUrl(image.storageKey, "");
     for (const url of [image.url, resolvedUrl, image.dataUrl]) {
         const publicUrl = publicHttpUrl(url);
@@ -400,6 +422,13 @@ async function mediaReferenceToFormValue(media: ReferenceVideo | ReferenceAudio)
     const resolvedUrl = await resolveMediaUrl(media.storageKey, media.url);
     const publicUrl = publicHttpUrl(resolvedUrl) || publicHttpUrl(media.url);
     if (publicUrl) return publicUrl;
+    if (useUserStore.getState().token) {
+        const uploaded = await uploadRemoteMediaToServer(resolvedUrl || media.url, media.name || (media.type.startsWith("audio/") ? "reference.mp3" : "reference.mp4"));
+        media.url = uploaded.url;
+        media.storageKey = uploaded.storageKey;
+        const uploadedPublicUrl = publicHttpUrl(uploaded.url);
+        if (uploadedPublicUrl) return uploadedPublicUrl;
+    }
     return mediaReferenceToFile(media);
 }
 
@@ -506,12 +535,13 @@ function isVideoEnvelope(payload: ApiVideoResponse): payload is ApiVideoEnvelope
 }
 
 function readAxiosError(error: unknown, fallback: string) {
-    if (error instanceof VideoRequestError) return { message: error.message, detail: error.detail || error.stack || error.message };
+    if (error instanceof VideoRequestError) return { message: friendlyAIErrorMessage(error.message, fallback), detail: error.detail || error.stack || error.message };
     if (axios.isAxiosError<{ error?: { message?: string }; msg?: string; code?: number }>(error)) {
         const responseData = error.response?.data;
-        return { message: responseData?.msg || responseData?.error?.message || (error.response?.status ? `${fallback}：${error.response.status}` : fallback), detail: responseData || error.message };
+        const rawMessage = responseData?.msg || responseData?.error?.message || (error.response?.status ? `${fallback}：${error.response.status}` : fallback);
+        return { message: friendlyAIErrorMessage(rawMessage, fallback), detail: responseData || error.message };
     }
-    return { message: error instanceof Error ? error.message : fallback, detail: error instanceof Error ? error.stack || error.message : error };
+    return { message: friendlyAIErrorMessage(error, fallback), detail: error instanceof Error ? error.stack || error.message : error };
 }
 
 async function writeVideoAICallLog(config: AiConfig, model: string, endpoint: string, method: "GET" | "POST", startedAt: number, status: number, requestBody: string, responseBody: string, error: string) {
@@ -599,6 +629,7 @@ function looksLikeBase64(value: string) {
 function normalizeVideoResponse(value: unknown): VideoResponse {
     const record = typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
     const id = firstString(record.id, record.request_id, record.task_id, record.video_id, firstTaskId(record));
+    const rawError = nestedMessage(record.error);
     return {
         ...(record as VideoResponse),
         id,
@@ -611,7 +642,14 @@ function normalizeVideoResponse(value: unknown): VideoResponse {
         channelName: firstString(record.channelName, record.channel_name),
         status: firstString(record.status, record.state),
         video_url: firstString(record.video_url, record.videoUrl, record.remixed_from_video_id, record.output_url, record.download_url, firstVideoUrl(record)),
+        first_frame_url: firstString(record.first_frame_url, record.firstFrameUrl),
+        firstFrameUrl: firstString(record.firstFrameUrl, record.first_frame_url),
+        firstFrameStorageKey: firstString(record.firstFrameStorageKey, record.first_frame_storage_key),
+        last_frame_url: firstString(record.last_frame_url, record.lastFrameUrl, record.tail_frame_url, record.end_frame_url),
+        lastFrameUrl: firstString(record.lastFrameUrl, record.last_frame_url, record.tail_frame_url, record.end_frame_url),
+        lastFrameStorageKey: firstString(record.lastFrameStorageKey, record.last_frame_storage_key),
         progress: typeof record.progress === "number" ? record.progress : (typeof record.progress === "string" ? parseFloat(record.progress) : undefined),
+        error: rawError ? { message: friendlyAIErrorMessage(rawError, "视频生成失败") } : undefined,
     };
 }
 

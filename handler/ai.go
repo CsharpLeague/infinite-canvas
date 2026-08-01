@@ -138,7 +138,14 @@ func proxyAIRequest(w http.ResponseWriter, r *http.Request, path string) {
 		credits *= readAIRequestCount(body, contentType)
 	}
 	upstreamPath := resolveAIProxyPath(channel, modelName, path)
-	if isKIEChannel(channel, modelName) && upstreamPath == "/jobs/createTask" {
+	if isSub2APITextRequest(channel, path) {
+		body, contentType, err = normalizeSub2APITextBody(body, contentType)
+		if err != nil {
+			log.Printf("AI proxy normalize Sub2API text request failed: model=%s err=%v", modelName, err)
+			Fail(w, "AI 接口请求失败")
+			return
+		}
+	} else if isKIEChannel(channel, modelName) && upstreamPath == "/jobs/createTask" {
 		body, contentType, err = normalizeKIEVideoBody(body, contentType, modelName, channel)
 		if err != nil {
 			log.Printf("AI proxy normalize KIE request failed: model=%s err=%v", modelName, err)
@@ -499,6 +506,9 @@ func agnesVideoQueryID(modelName string, path string) (string, bool) {
 }
 
 func resolveAIProxyPath(channel model.ModelChannel, modelName string, path string) string {
+	if isSub2APITextRequest(channel, path) {
+		return "/responses"
+	}
 	if isKIEChannel(channel, modelName) {
 		if path == "/videos" || path == "/images/generations" || path == "/images/edits" {
 			return "/jobs/createTask"

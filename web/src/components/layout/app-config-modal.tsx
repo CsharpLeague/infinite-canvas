@@ -271,7 +271,7 @@ export function AppConfigModal() {
             }
         >
             <div className="pt-1">
-                <Form layout="vertical" requiredMark={false}>
+                <Form layout="vertical" requiredMark={false} autoComplete="off">
                     {allowCustomChannel && canUseRemoteChannel ? (
                         <Form.Item label="渠道模式" className="mb-5">
                             <Segmented
@@ -303,7 +303,7 @@ export function AppConfigModal() {
                                         <div className="grid gap-2 md:grid-cols-[160px_minmax(0,1fr)_minmax(0,1fr)_auto]">
                                             <Input value={channel.name} placeholder="渠道名称" onChange={(event) => patchLocalChannel(channel.id, { name: event.target.value })} />
                                             <Input value={channel.baseUrl} placeholder="Base URL" onChange={(event) => patchLocalChannel(channel.id, { baseUrl: event.target.value })} />
-                                            <Input.Password value={channel.apiKey} placeholder="API Key" onChange={(event) => patchLocalChannel(channel.id, { apiKey: event.target.value })} />
+                                            <Input.Password name={`channel_api_key_${channel.id}`} autoComplete="new-password" data-1p-ignore data-lpignore="true" value={channel.apiKey} placeholder="API Key" onChange={(event) => patchLocalChannel(channel.id, { apiKey: event.target.value })} />
                                             <div className="flex gap-2">
                                                 <Button size="small" loading={loadingModels} onClick={() => void refreshLocalChannelModels(channel)}>
                                                     拉取
@@ -401,7 +401,7 @@ export function AppConfigModal() {
                                     <Input value={userStorage.region} placeholder="Region，R2 通常为 auto" onChange={(event) => setUserStorage((value) => ({ ...value, region: event.target.value }))} />
                                     <Input value={userStorage.bucket} placeholder="Bucket 名称" onChange={(event) => setUserStorage((value) => ({ ...value, bucket: event.target.value }))} />
                                     <Input value={userStorage.accessKeyId} placeholder="Access Key ID" onChange={(event) => setUserStorage((value) => ({ ...value, accessKeyId: event.target.value }))} />
-                                    <Input.Password value={userStorage.secretAccessKey} placeholder="Secret Access Key" onChange={(event) => setUserStorage((value) => ({ ...value, secretAccessKey: event.target.value }))} />
+                                    <Input.Password name="canvas_storage_secret_key" autoComplete="new-password" data-1p-ignore data-lpignore="true" value={userStorage.secretAccessKey} placeholder="Secret Access Key" onChange={(event) => setUserStorage((value) => ({ ...value, secretAccessKey: event.target.value }))} />
                                     <Input value={userStorage.publicBaseUrl} placeholder="公开访问地址，例如 https://pub-xxx.r2.dev" onChange={(event) => setUserStorage((value) => ({ ...value, publicBaseUrl: event.target.value }))} />
                                     <Input value={userStorage.pathPrefix} placeholder="保存路径前缀，例如 images" onChange={(event) => setUserStorage((value) => ({ ...value, pathPrefix: event.target.value }))} />
                                 </div>

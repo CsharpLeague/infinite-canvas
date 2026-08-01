@@ -67,7 +67,7 @@ export function VideoSettingsPanel({ config, modelName, onConfigChange, theme, s
     const dimensions = readSizeDimensions(size);
     const resolution = normalizeVideoResolutionValue(config.vquality);
     const audioGenerationEnabled = supportsVideoAudioGeneration(model);
-    const generateAudio = boolConfig(config.videoGenerateAudio, false);
+    const generateAudio = boolConfig(config.videoGenerateAudio, true);
     const updateDimension = (key: "width" | "height", value: number | null) => {
         const next = Math.max(1, Math.floor(value || dimensions[key] || 720));
         onConfigChange("size", `${key === "width" ? next : dimensions.width}x${key === "height" ? next : dimensions.height}`);
@@ -146,7 +146,7 @@ function KlingV26VideoSettingsPanel({ config, modelName, onConfigChange, theme, 
     const mode = isV3 && config.videoMode === "4k" ? "4k" : config.videoMode === "pro" ? "pro" : "std";
     const ratio = normalizeKlingV26Ratio(config.size);
     const duration = isV3 ? normalizeKlingV3Duration(config.videoSeconds) : normalizeKlingV26Duration(config.videoSeconds);
-    const generateAudio = boolConfig(config.videoGenerateAudio, false);
+    const generateAudio = boolConfig(config.videoGenerateAudio, true);
 
     return (
         <ImageSettingsTheme theme={theme}>
@@ -223,7 +223,7 @@ function SeedanceVideoSettingsPanel({ config, modelName, onConfigChange, theme, 
     const duration = normalizeSeedanceDuration(config.videoSeconds);
     const watermark = boolConfig(config.videoWatermark, false);
     const audioGenerationEnabled = supportsVideoAudioGeneration(model);
-    const generateAudio = boolConfig(config.videoGenerateAudio, false);
+    const generateAudio = boolConfig(config.videoGenerateAudio, true);
 
     return (
         <ImageSettingsTheme theme={theme}>

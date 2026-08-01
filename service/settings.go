@@ -277,6 +277,8 @@ func normalizePrivateSetting(setting model.PrivateSetting) model.PrivateSetting 
 func hidePrivateAPIKeys(settings model.Settings) model.Settings {
 	for i := range settings.Private.Channels {
 		settings.Private.Channels[i].APIKey = ""
+		settings.Private.Channels[i].AssetAccessKeyID = ""
+		settings.Private.Channels[i].AssetSecretAccessKey = ""
 	}
 	for i := range settings.Private.Storage.Providers {
 		settings.Private.Storage.Providers[i].SecretAccessKey = ""
@@ -287,11 +289,16 @@ func hidePrivateAPIKeys(settings model.Settings) model.Settings {
 
 func keepPrivateAPIKeys(settings *model.Settings, saved model.Settings) {
 	for i := range settings.Private.Channels {
-		if strings.TrimSpace(settings.Private.Channels[i].APIKey) != "" {
-			continue
-		}
 		if channel, ok := findSavedChannel(settings.Private.Channels[i], saved.Private.Channels, i); ok {
-			settings.Private.Channels[i].APIKey = channel.APIKey
+			if strings.TrimSpace(settings.Private.Channels[i].APIKey) == "" {
+				settings.Private.Channels[i].APIKey = channel.APIKey
+			}
+			if strings.TrimSpace(settings.Private.Channels[i].AssetAccessKeyID) == "" {
+				settings.Private.Channels[i].AssetAccessKeyID = channel.AssetAccessKeyID
+			}
+			if strings.TrimSpace(settings.Private.Channels[i].AssetSecretAccessKey) == "" {
+				settings.Private.Channels[i].AssetSecretAccessKey = channel.AssetSecretAccessKey
+			}
 		}
 	}
 }
@@ -910,14 +917,15 @@ func publicChannelInfos(channels []model.ModelChannel) []model.PublicModelChanne
 			continue
 		}
 		result = append(result, model.PublicModelChannelInfo{
-			ID:      channel.ID,
-			Name:    channel.Name,
-			BaseURL: channel.BaseURL,
-			Models:  append([]string{}, channel.Models...),
-			Weight:  channel.Weight,
-			Timeout: channel.Timeout,
-			Enabled: channel.Enabled,
-			Remark:  channel.Remark,
+			ID:                     channel.ID,
+			Name:                   channel.Name,
+			BaseURL:                channel.BaseURL,
+			Models:                 append([]string{}, channel.Models...),
+			Weight:                 channel.Weight,
+			Timeout:                channel.Timeout,
+			Enabled:                channel.Enabled,
+			Remark:                 channel.Remark,
+			VirtualPortraitEnabled: strings.EqualFold(channel.Protocol, "ark") && strings.TrimSpace(channel.AssetAccessKeyID) != "" && strings.TrimSpace(channel.AssetSecretAccessKey) != "",
 		})
 	}
 	return result

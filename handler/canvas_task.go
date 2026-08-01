@@ -252,7 +252,11 @@ func runCanvasImageTask(task model.CanvasImageTask, user model.AuthUser, body []
 	task.Status = "processing"
 	task.Progress = 10
 	task.StartedAt = current
-	task, _ = service.SaveCanvasImageTask(task)
+	if saved, saveErr := service.SaveCanvasImageTask(task); saveErr == nil {
+		task = saved
+	} else {
+		log.Printf("mark canvas image task processing failed id=%s err=%v", task.ID, saveErr)
+	}
 
 	payload, status, _, err := executeCanvasAIRequest(user, task.Endpoint, body, contentType, channelID, userChannelID)
 	if err != nil {
@@ -270,22 +274,77 @@ func runCanvasImageTask(task model.CanvasImageTask, user model.AuthUser, body []
 	}
 	imageURL, mimeType, bytes, err := imageURLFromAIResponse(payload)
 	if err != nil {
-		saveFailedCanvasImageTask(task, err.Error(), string(payload))
+		saveFailedCanvasImageTask(task, err.Error(), summarizeCanvasTaskPayload(payload))
+		return
+	}
+	remoteImage := strings.HasPrefix(imageURL, "http://") || strings.HasPrefix(imageURL, "https://")
+	if remoteImage {
+		task.Status = "storage_pending"
+		task.Progress = 90
+		task.ResponseBody = summarizeCanvasTaskPayload(payload)
+		task.ImageURL = imageURL
+		task.MimeType = mimeType
+		task.Bytes = bytes
+		task.Error = ""
+		task.ErrorDetail = ""
+		if saved, saveErr := service.SaveCanvasImageTask(task); saveErr == nil {
+			task = saved
+		} else {
+			log.Printf("save canvas image result before storage upload failed id=%s err=%v", task.ID, saveErr)
+		}
+	}
+	var object service.UploadedStorageObject
+	storageContext := service.WithUser(context.Background(), user)
+	if remoteImage {
+		object, err = service.UploadRemoteStorageObject(storageContext, imageURL, "canvas-image")
+	} else {
+		data, detectedMimeType, decodeErr := imageCandidateBytes(imageURL)
+		if decodeErr != nil {
+			saveFailedCanvasImageTask(task, decodeErr.Error(), summarizeCanvasTaskPayload(payload))
+			return
+		}
+		if mimeType == "" {
+			mimeType = detectedMimeType
+		}
+		object, err = service.UploadStorageObject(storageContext, "canvas-image"+extensionForTaskMime(mimeType), mimeType, data)
+	}
+	if err != nil {
+		if !remoteImage {
+			saveFailedCanvasImageTask(task, "图片上传云存储失败", err.Error())
+			return
+		}
+		task.Status = "completed"
+		task.Progress = 100
+		task.CompletedAt = taskTime()
+		task.Error = ""
+		task.ErrorDetail = "图片自动上传云存储失败：" + err.Error()
+		if _, saveErr := service.SaveCanvasImageTask(task); saveErr != nil {
+			log.Printf("save canvas image storage fallback failed id=%s err=%v", task.ID, saveErr)
+		}
 		return
 	}
 	task.Status = "completed"
 	task.Progress = 100
 	task.CompletedAt = taskTime()
-	task.ResponseBody = string(payload)
-	task.ImageURL = imageURL
-	task.StorageKey = ""
-	task.MimeType = mimeType
-	task.Bytes = bytes
+	task.ResponseBody = summarizeCanvasTaskPayload(payload)
+	task.ImageURL = object.URL
+	task.StorageKey = object.StorageKey
+	task.MimeType = firstNonEmpty(object.MimeType, mimeType)
+	task.Bytes = object.Bytes
+	if task.Bytes == 0 {
+		task.Bytes = bytes
+	}
 	task.Width = 0
 	task.Height = 0
 	task.Error = ""
 	task.ErrorDetail = ""
-	_, _ = service.SaveCanvasImageTask(task)
+	if _, saveErr := service.SaveCanvasImageTask(task); saveErr != nil {
+		log.Printf("complete canvas image task failed id=%s err=%v", task.ID, saveErr)
+		task.ResponseBody = ""
+		task.ImageURL = ""
+		task.StorageKey = ""
+		saveFailedCanvasImageTask(task, "图片任务保存失败", saveErr.Error())
+	}
 }
 
 func runCanvasAudioTask(task model.CanvasAudioTask, user model.AuthUser, body []byte, contentType string, channelID string, userChannelID string) {
@@ -361,8 +420,23 @@ func saveFailedCanvasImageTask(task model.CanvasImageTask, message string, detai
 	task.Status = "failed"
 	task.CompletedAt = taskTime()
 	task.Error = firstNonEmpty(message, "图片生成失败")
-	task.ErrorDetail = detail
-	_, _ = service.SaveCanvasImageTask(task)
+	task.ErrorDetail = truncateCanvasTaskText(detail)
+	task.ResponseBody = truncateCanvasTaskText(task.ResponseBody)
+	if _, err := service.SaveCanvasImageTask(task); err != nil {
+		log.Printf("mark canvas image task failed id=%s err=%v", task.ID, err)
+	}
+}
+
+func summarizeCanvasTaskPayload(payload []byte) string {
+	return truncateCanvasTaskText(summarizeAIRequest(payload, "application/json"))
+}
+
+func truncateCanvasTaskText(value string) string {
+	const maxBytes = 32 * 1024
+	if len(value) <= maxBytes {
+		return value
+	}
+	return strings.ToValidUTF8(value[:maxBytes], "") + "\n[truncated]"
 }
 
 func saveFailedCanvasAudioTask(task model.CanvasAudioTask, message string, detail string) {
@@ -629,8 +703,6 @@ func taskTime() string {
 	return time.Now().UTC().Format(time.RFC3339Nano)
 }
 
-
-
 func readCanvasTaskSources(r *http.Request) []string {
 	values := r.URL.Query()["source"]
 	result := make([]string, 0, len(values))
@@ -643,5 +715,3 @@ func readCanvasTaskSources(r *http.Request) []string {
 	}
 	return result
 }
-
-

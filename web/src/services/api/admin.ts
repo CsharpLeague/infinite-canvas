@@ -167,6 +167,8 @@ export type AdminModelChannel = {
     name: string;
     baseUrl: string;
     apiKey: string;
+    assetAccessKeyId: string;
+    assetSecretAccessKey: string;
     models: string[];
     weight: number;
     timeout: number;
@@ -208,6 +210,7 @@ export type AdminPublicModelChannelInfo = {
     timeout: number;
     enabled: boolean;
     remark: string;
+    virtualPortraitEnabled: boolean;
 };
 
 export type AdminPublicSettings = {

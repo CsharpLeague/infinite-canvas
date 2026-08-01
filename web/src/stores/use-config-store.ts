@@ -68,7 +68,7 @@ export type AiConfig = {
         workflowAgent: string;
     };
     localChannels: LocalModelChannel[];
-    publicChannels: Array<{ id?: string; name?: string; baseUrl?: string; models?: string[]; weight?: number; timeout?: number; enabled?: boolean; remark?: string }>;
+    publicChannels: Array<{ id?: string; name?: string; baseUrl?: string; models?: string[]; weight?: number; timeout?: number; enabled?: boolean; remark?: string; virtualPortraitEnabled?: boolean }>;
     syncModelConfig: boolean;
     syncStorageConfig: boolean;
     activeChannelId: string;
@@ -102,7 +102,7 @@ export const defaultConfig: AiConfig = {
     videoMultiPrompt: [{ prompt: "", duration: "1" }],
     videoElementList: [{ name: "", description: "", references: [] }],
     vquality: "720",
-    videoGenerateAudio: "false",
+    videoGenerateAudio: "true",
     videoWatermark: "false",
     videoCharacterOrientation: "video",
     systemPrompt: "",
@@ -340,6 +340,12 @@ export const useConfigStore = create<ConfigStore>()(
         }),
         {
             name: CONFIG_STORE_KEY,
+            version: 1,
+            migrate: (persistedState, version) => {
+                const state = (persistedState || {}) as Partial<ConfigStore>;
+                if (version >= 1 || !state.config) return state;
+                return { ...state, config: { ...state.config, videoGenerateAudio: "true" } };
+            },
             partialize: (state) => ({ config: state.config }),
             merge: (persisted, current) => {
                 const persistedState = (persisted || {}) as Partial<ConfigStore>;
@@ -380,7 +386,7 @@ export const useConfigStore = create<ConfigStore>()(
                         videoMultiPrompt: Array.isArray(config.videoMultiPrompt) && config.videoMultiPrompt.length ? config.videoMultiPrompt : defaultConfig.videoMultiPrompt,
                         videoElementList: Array.isArray(config.videoElementList) && config.videoElementList.length ? config.videoElementList : defaultConfig.videoElementList,
                         vquality: config.vquality || "720",
-                        videoGenerateAudio: config.videoGenerateAudio || "false",
+                        videoGenerateAudio: config.videoGenerateAudio || "true",
                         videoWatermark: config.videoWatermark || "false",
                         videoCharacterOrientation: config.videoCharacterOrientation === "image" ? "image" : "video",
                         canvasImageCount: config.canvasImageCount || "1",

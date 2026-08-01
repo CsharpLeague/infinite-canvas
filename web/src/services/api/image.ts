@@ -1,5 +1,6 @@
 import axios from "axios";
 
+import { friendlyAIErrorMessage } from "@/lib/ai-error-message";
 import { dataUrlToFile } from "@/lib/image-utils";
 import { imageToDataUrl, resolveImageUrl } from "@/services/image-storage";
 import { buildApiUrl, channelIdForActiveModel, localChannelForActiveModel, type AiConfig } from "@/stores/use-config-store";
@@ -458,7 +459,12 @@ function parseStreamChunk(chunk: string, onDelta: (value: string) => void) {
             .find((line) => line.startsWith("data: "))
             ?.slice(6);
         if (!data || data === "[DONE]") continue;
-        const delta = (JSON.parse(data) as { choices?: Array<{ delta?: { content?: string } }> }).choices?.[0]?.delta?.content || "";
+        const payload = JSON.parse(data) as {
+            type?: string;
+            delta?: string;
+            choices?: Array<{ delta?: { content?: string } }>;
+        };
+        const delta = payload.choices?.[0]?.delta?.content || (payload.type === "response.output_text.delta" ? payload.delta : "") || "";
         deltaText += delta;
     }
     if (deltaText) onDelta(deltaText);
@@ -1020,7 +1026,7 @@ export async function requestImageQuestion(config: AiConfig, messages: ChatCompl
             });
         }
     } catch (error) {
-        throw new Error(readAxiosError(error, "请求失败"));
+        throw new Error(friendlyAIErrorMessage(readAxiosError(error, "请求失败"), "图片理解失败"));
     }
     refreshRemoteUser(config);
     return answer || "没有返回内容";

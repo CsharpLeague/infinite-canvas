@@ -12,6 +12,7 @@ import { fetchUserAssetData, syncUserAssetData } from "@/services/api/user-confi
 export type AssetKind = "text" | "image" | "video" | "audio";
 export type TextAsset = AssetBase<"text"> & { data: { content: string } };
 export type ImageAsset = AssetBase<"image"> & { data: { dataUrl: string; storageKey?: string; width: number; height: number; bytes: number; mimeType: string } };
+export type VirtualPortraitMetadata = { type: "virtual_portrait"; taskId: string; channelId: string; groupId?: string; assetId?: string; status: "processing" | "active" | "failed"; error?: string; sourceFingerprint?: string };
 export type VideoAsset = AssetBase<"video"> & { data: { url: string; storageKey?: string; width: number; height: number; bytes: number; mimeType: string } };
 export type AudioAsset = AssetBase<"audio"> & { data: { url: string; storageKey?: string; bytes?: number; mimeType: string; durationMs?: number } };
 export type Asset = TextAsset | ImageAsset | VideoAsset | AudioAsset;

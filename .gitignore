@@ -1,6 +1,10 @@
 .next/
 out/
 node_modules/
+/bin/
+/deployment/
+/.cache/
+/.tools/
 .env*
 !.env.example
 data/
