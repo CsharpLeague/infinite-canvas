@@ -52,6 +52,7 @@ export type AiConfig = {
     audioModels: string[];
     quality: string;
     size: string;
+    videoSize: string;
     count: string;
     canvasImageCount: string;
     timeout: string;
@@ -113,6 +114,7 @@ export const defaultConfig: AiConfig = {
     audioModels: [],
     quality: "auto",
     size: "1:1",
+    videoSize: "1280x720",
     count: "1",
     canvasImageCount: "1",
     timeout: "600",

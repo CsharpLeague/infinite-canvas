@@ -50,14 +50,15 @@ type VideoSettingsPanelProps = {
     showTitle?: boolean;
     className?: string;
     hideNegativePrompt?: boolean;
+    visualOnly?: boolean;
 };
 
-export function VideoSettingsPanel({ config, modelName, onConfigChange, theme, showTitle = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5", hideNegativePrompt = false }: VideoSettingsPanelProps) {
+export function VideoSettingsPanel({ config, modelName, onConfigChange, theme, showTitle = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5", hideNegativePrompt = false, visualOnly = false }: VideoSettingsPanelProps) {
     if (isAPIMartKlingV26Config(config, modelName || config.model || config.videoModel) || isAPIMartKlingV3Config(config, modelName || config.model || config.videoModel) || isKIEKlingV3Config(config, modelName || config.model || config.videoModel)) {
-        return <KlingV26VideoSettingsPanel config={config} modelName={modelName} onConfigChange={onConfigChange} theme={theme} showTitle={showTitle} className={className} hideNegativePrompt={hideNegativePrompt} />;
+        return <KlingV26VideoSettingsPanel config={config} modelName={modelName} onConfigChange={onConfigChange} theme={theme} showTitle={showTitle} className={className} hideNegativePrompt={hideNegativePrompt} visualOnly={visualOnly} />;
     }
     if (isSeedanceVideoConfig(config)) {
-        return <SeedanceVideoSettingsPanel config={config} modelName={modelName} onConfigChange={onConfigChange} theme={theme} showTitle={showTitle} className={className} />;
+        return <SeedanceVideoSettingsPanel config={config} modelName={modelName} onConfigChange={onConfigChange} theme={theme} showTitle={showTitle} className={className} visualOnly={visualOnly} />;
     }
 
     const model = modelName || config.model || config.videoModel;
@@ -77,7 +78,7 @@ export function VideoSettingsPanel({ config, modelName, onConfigChange, theme, s
         <ImageSettingsTheme theme={theme}>
             <div className={className} style={{ color: theme.node.text }} onMouseDown={(event) => event.stopPropagation()}>
                 {showTitle ? <div className="text-lg font-semibold">视频设置</div> : null}
-                {isKIEGrokVideoModel(config, model) ? (
+                {!visualOnly && isKIEGrokVideoModel(config, model) ? (
                     <SettingGroup title="模式选择" color={theme.node.muted}>
                         <div className="grid grid-cols-3 gap-2.5">
                             {grokVideoModeOptions.map((item) => (
@@ -125,23 +126,27 @@ export function VideoSettingsPanel({ config, modelName, onConfigChange, theme, s
                         ))}
                     </div>
                 </SettingGroup>
-                <SettingGroup title="秒数" color={theme.node.muted}>
-                    <div className="grid grid-cols-3 gap-2.5">
+                {!visualOnly ? (
+                    <>
+                        <SettingGroup title="秒数" color={theme.node.muted}>
+                            <div className="grid grid-cols-3 gap-2.5">
                         {secondOptions.map((value) => (
                             <OptionPill key={value} selected={seconds === String(value)} theme={theme} onClick={() => onConfigChange("videoSeconds", String(value))}>
                                 {value}s
                             </OptionPill>
                         ))}
                         <NumberInput value={seconds} min={1} max={30} theme={theme} onChange={(value) => onConfigChange("videoSeconds", value)} />
-                    </div>
-                </SettingGroup>
-                {audioGenerationEnabled ? <AudioGenerationSetting checked={generateAudio} theme={theme} onChange={(checked) => onConfigChange("videoGenerateAudio", String(checked))} /> : null}
+                            </div>
+                        </SettingGroup>
+                        {audioGenerationEnabled ? <AudioGenerationSetting checked={generateAudio} theme={theme} onChange={(checked) => onConfigChange("videoGenerateAudio", String(checked))} /> : null}
+                    </>
+                ) : null}
             </div>
         </ImageSettingsTheme>
     );
 }
 
-function KlingV26VideoSettingsPanel({ config, modelName, onConfigChange, theme, showTitle, className, hideNegativePrompt }: VideoSettingsPanelProps) {
+function KlingV26VideoSettingsPanel({ config, modelName, onConfigChange, theme, showTitle, className, hideNegativePrompt, visualOnly }: VideoSettingsPanelProps) {
     const isV3 = isAPIMartKlingV3Config(config, modelName || config.model || config.videoModel) || isKIEKlingV3Config(config, modelName || config.model || config.videoModel);
     const mode = isV3 && config.videoMode === "4k" ? "4k" : config.videoMode === "pro" ? "pro" : "std";
     const ratio = normalizeKlingV26Ratio(config.size);
@@ -152,7 +157,7 @@ function KlingV26VideoSettingsPanel({ config, modelName, onConfigChange, theme, 
         <ImageSettingsTheme theme={theme}>
             <div className={className} style={{ color: theme.node.text }} onMouseDown={(event) => event.stopPropagation()}>
                 {showTitle ? <div className="text-lg font-semibold">视频设置</div> : null}
-                {hideNegativePrompt ? null : (
+                {hideNegativePrompt || visualOnly ? null : (
                     <SettingGroup title="负面提示词" color={theme.node.muted}>
                         <Input.TextArea
                             value={config.videoNegativePrompt || ""}
@@ -200,23 +205,27 @@ function KlingV26VideoSettingsPanel({ config, modelName, onConfigChange, theme, 
                         ))}
                     </div>
                 </SettingGroup>
-                <SettingGroup title="时长" color={theme.node.muted}>
-                    <div className={`grid gap-2.5 ${isV3 ? "grid-cols-3" : "grid-cols-2"}`}>
+                {!visualOnly ? (
+                    <>
+                        <SettingGroup title="时长" color={theme.node.muted}>
+                            <div className={`grid gap-2.5 ${isV3 ? "grid-cols-3" : "grid-cols-2"}`}>
                         {(isV3 ? klingV3DurationOptions : klingV26DurationOptions).map((value) => (
                             <OptionPill key={value} selected={duration === value} theme={theme} onClick={() => onConfigChange("videoSeconds", String(value))}>
                                 {value}s
                             </OptionPill>
                         ))}
                         {isV3 ? <NumberInput value={String(duration)} min={3} max={15} theme={theme} onChange={(value) => onConfigChange("videoSeconds", value)} /> : null}
-                    </div>
-                </SettingGroup>
-                <AudioGenerationSetting checked={generateAudio} hint={isV3 ? undefined : "仅专业模式，仅一张参考图可用"} theme={theme} onChange={(checked) => onConfigChange("videoGenerateAudio", String(checked))} />
+                            </div>
+                        </SettingGroup>
+                        <AudioGenerationSetting checked={generateAudio} hint={isV3 ? undefined : "仅专业模式，仅一张参考图可用"} theme={theme} onChange={(checked) => onConfigChange("videoGenerateAudio", String(checked))} />
+                    </>
+                ) : null}
             </div>
         </ImageSettingsTheme>
     );
 }
 
-function SeedanceVideoSettingsPanel({ config, modelName, onConfigChange, theme, showTitle, className }: VideoSettingsPanelProps) {
+function SeedanceVideoSettingsPanel({ config, modelName, onConfigChange, theme, showTitle, className, visualOnly }: VideoSettingsPanelProps) {
     const model = modelName || config.model || config.videoModel;
     const resolution = normalizeSeedanceResolution(config.vquality, model);
     const ratio = normalizeSeedanceRatio(config.size);
@@ -260,8 +269,10 @@ function SeedanceVideoSettingsPanel({ config, modelName, onConfigChange, theme, 
                         ))}
                     </div>
                 </SettingGroup>
-                <SettingGroup title="时长" color={theme.node.muted}>
-                    <div className="grid grid-cols-4 gap-2.5">
+                {!visualOnly ? (
+                    <>
+                        <SettingGroup title="时长" color={theme.node.muted}>
+                            <div className="grid grid-cols-4 gap-2.5">
                         {seedanceDurationOptions.map((value) => (
                             <OptionPill key={value} selected={duration === value} theme={theme} onClick={() => onConfigChange("videoSeconds", String(value))}>
                                 {value === -1 ? "智能" : `${value}s`}
@@ -271,11 +282,13 @@ function SeedanceVideoSettingsPanel({ config, modelName, onConfigChange, theme, 
                     <NumberInput value={String(duration)} min={-1} max={15} theme={theme} onChange={(value) => onConfigChange("videoSeconds", value)} />
                 </SettingGroup>
                 {audioGenerationEnabled ? <AudioGenerationSetting checked={generateAudio} theme={theme} onChange={(checked) => onConfigChange("videoGenerateAudio", String(checked))} /> : null}
-                <SettingGroup title="输出" color={theme.node.muted}>
-                    <div className="grid gap-2 rounded-xl border p-2.5" style={{ borderColor: theme.node.stroke }}>
-                        <SwitchRow label="添加水印" checked={watermark} theme={theme} onChange={(checked) => onConfigChange("videoWatermark", String(checked))} />
-                    </div>
-                </SettingGroup>
+                        <SettingGroup title="输出" color={theme.node.muted}>
+                            <div className="grid gap-2 rounded-xl border p-2.5" style={{ borderColor: theme.node.stroke }}>
+                                <SwitchRow label="添加水印" checked={watermark} theme={theme} onChange={(checked) => onConfigChange("videoWatermark", String(checked))} />
+                            </div>
+                        </SettingGroup>
+                    </>
+                ) : null}
             </div>
         </ImageSettingsTheme>
     );

@@ -223,6 +223,14 @@ func apimartVideoConfig(modelName string) apimartInputConfig {
 		config.imageRefKind = "first_last"
 	case strings.Contains(model, "veo"):
 		config.aspectField = "aspect_ratio"
+	case model == "minimax-h3":
+		config.aspectField = "aspect_ratio"
+		config.imageRefField = "image_urls"
+		config.imageRefKind = "minimax_h3"
+		config.videoRefField = "video_urls"
+		config.videoRefKind = "array"
+		config.audioRefField = "audio_urls"
+		config.audioRefKind = "array"
 	case strings.Contains(model, "minimax-hailuo-2-3"):
 		config.aspectField = ""
 		config.imageRefField = "first_frame_image"
@@ -551,6 +559,19 @@ func normalizeAPIMartImageCount(payload map[string]any, config apimartInputConfi
 
 func applyAPIMartVideoDefaults(payload map[string]any, modelName string) {
 	model := normalizeAPIMartModelName(modelName)
+	if model == "minimax-h3" {
+		payload["resolution"] = "2K"
+		if !isEmptyValue(payload["duration"]) {
+			duration := normalizeAPIMartInt(payload["duration"])
+			if duration < 4 {
+				duration = 4
+			}
+			if duration > 15 {
+				duration = 15
+			}
+			payload["duration"] = duration
+		}
+	}
 	if strings.Contains(model, "wan2-5") && isEmptyValue(payload["audio"]) {
 		payload["audio"] = true
 	}
@@ -973,7 +994,7 @@ func isAPIMartLastFrameSource(sourceKey string) bool {
 
 func supportsAPIMartNamedFrameFields(config apimartInputConfig) bool {
 	switch config.imageRefKind {
-	case "first_last", "skyreels", "pixverse", "happyhorse":
+	case "first_last", "skyreels", "pixverse", "happyhorse", "minimax_h3":
 		return true
 	default:
 		return false
@@ -1629,6 +1650,12 @@ func normalizeAPIMartSizeRatio(width int, height int) string {
 		ratio  string
 	}{
 		{1, 1, "1:1"},
+		{2, 1, "2:1"},
+		{1, 2, "1:2"},
+		{3, 1, "3:1"},
+		{1, 3, "1:3"},
+		{5, 4, "5:4"},
+		{4, 5, "4:5"},
 		{16, 9, "16:9"},
 		{9, 16, "9:16"},
 		{4, 3, "4:3"},
