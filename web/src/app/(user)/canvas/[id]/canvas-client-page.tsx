@@ -395,7 +395,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
             agentConfig || {
                 imageQuality: effectiveConfig.quality,
                 imageSize: effectiveConfig.size,
-                videoQuality: effectiveConfig.vquality,
+                videoQuality: "480",
                 videoSize: effectiveConfig.videoSize,
             },
         [agentConfig, effectiveConfig.quality, effectiveConfig.size, effectiveConfig.videoSize, effectiveConfig.vquality],
@@ -719,7 +719,11 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
 
     const createConnectedNode = useCallback(
         (type: CanvasNodeType, pending: PendingConnectionCreate) => {
-            const metadata = type === CanvasNodeType.Config ? { model: effectiveConfig.imageModel || effectiveConfig.model, size: effectiveConfig.size, count: getGenerationCount(effectiveConfig.canvasImageCount || effectiveConfig.count) } : undefined;
+            const metadata = type === CanvasNodeType.Config
+                ? { model: effectiveConfig.imageModel || effectiveConfig.model, size: effectiveConfig.size, count: getGenerationCount(effectiveConfig.canvasImageCount || effectiveConfig.count) }
+                : type === CanvasNodeType.Video
+                    ? { vquality: "480" }
+                    : undefined;
             const newNode = createCanvasNode(type, pending.position, metadata);
             const connection = normalizeConnection(pending.connection.nodeId, newNode.id, [...nodesRef.current, newNode], pending.connection.handleType);
             if (!connection) {
@@ -941,7 +945,9 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                         size: effectiveConfig.size,
                         count: getGenerationCount(effectiveConfig.canvasImageCount || effectiveConfig.count),
                     }
-                    : undefined;
+                    : type === CanvasNodeType.Video
+                        ? { vquality: "480" }
+                        : undefined;
             const newNode = createCanvasNode(
                 type,
                 targetPosition,

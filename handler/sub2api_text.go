@@ -35,6 +35,33 @@ func normalizeSub2APITextBody(body []byte, contentType string) ([]byte, string, 
 			}
 			continue
 		}
+		if role == "assistant" {
+			if content := normalizeResponsesMessageContent(message["content"]); content != nil && responseMessageText(message["content"]) != "" {
+				responsesInput = append(responsesInput, map[string]any{"role": role, "content": content})
+			}
+			toolCalls, _ := message["tool_calls"].([]any)
+			for _, toolCall := range toolCalls {
+				call, _ := toolCall.(map[string]any)
+				function, _ := call["function"].(map[string]any)
+				if name := strings.TrimSpace(fmt.Sprint(function["name"])); name != "" {
+					responsesInput = append(responsesInput, map[string]any{
+						"type":      "function_call",
+						"call_id":   strings.TrimSpace(fmt.Sprint(call["id"])),
+						"name":      name,
+						"arguments": function["arguments"],
+					})
+				}
+			}
+			continue
+		}
+		if role == "tool" {
+			responsesInput = append(responsesInput, map[string]any{
+				"type":    "function_call_output",
+				"call_id": strings.TrimSpace(fmt.Sprint(message["tool_call_id"])),
+				"output":  responseMessageText(message["content"]),
+			})
+			continue
+		}
 		responsesInput = append(responsesInput, map[string]any{
 			"role":    role,
 			"content": normalizeResponsesMessageContent(message["content"]),
