@@ -25,6 +25,7 @@ description: 当前后端主要数据表与字段说明
 - `assets`
 - `settings`
 - `video_tasks`
+- `virtual_portrait_tasks`
 - `video_generation_logs`
 - `image_generation_logs`
 - `canvas_image_tasks`
@@ -115,7 +116,14 @@ description: 当前后端主要数据表与字段说明
 | `progress` | number | 生成进度，0-100 |
 | `seconds` | string | 视频秒数 |
 | `size` | string | 视频尺寸 |
-| `video_url` | text | 完成后的视频临时 URL |
+| `video_url` | text | 完成后转存云端的视频 URL |
+| `storage_key` | string | 云存储对象 key |
+| `first_frame_url` | text | 视频首帧图片 URL，优先为云存储地址 |
+| `first_frame_key` | string | 视频首帧云存储对象 key |
+| `last_frame_url` | text | 视频尾帧图片 URL，优先为云存储地址 |
+| `last_frame_key` | string | 视频尾帧云存储对象 key |
+| `mime_type` | string | 视频 MIME 类型 |
+| `bytes` | number | 视频文件字节数 |
 | `error` | text | 失败摘要 |
 | `error_detail` | text | 失败详情或最近一次轮询错误详情 |
 | `request_body` | text | 创建任务时的请求摘要 |
@@ -276,7 +284,9 @@ description: 当前后端主要数据表与字段说明
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | `model` | string | 模型名称 |
-| `credits` | number | 每次后端模型接口调用前预扣的算力点，未配置默认不扣除 |
+| `billingMode` | string | `fixed` 固定扣费；`video` 按视频分辨率和秒数扣费 |
+| `credits` | number | 固定扣费点数；动态视频参数无法识别时的回退点数 |
+| `videoRates` | object | `480p`、`720p`、`1080p` 三档每秒算力点 |
 
 `auth.linuxDo` 当前字段：
 
@@ -344,3 +354,6 @@ description: 当前后端主要数据表与字段说明
 | `admin_adjust` | 后台手动调整 |
 | `ai_consume` | 调用后端模型接口消费 |
 | `ai_refund` | 后端模型接口调用失败返还 |
+### virtual_portrait_tasks
+
+保存火山方舟虚拟人像素材的异步入库状态。`user_id + channel_id + source_fingerprint` 唯一，防止同一用户把同一图片重复提交到同一火山渠道。`asset_id` 可用后以 `asset://<asset_id>` 形式传给 Seedance 视频接口。删除已入库素材时，后端先通过 AK/SK 签名调用火山 `DeleteAsset`，成功后再删除本地任务记录。MySQL 增量建表脚本见 `docs/deployment/mysql-virtual-portraits.sql`。

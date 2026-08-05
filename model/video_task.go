@@ -17,6 +17,13 @@ type VideoTask struct {
 	Seconds         string `json:"seconds"`
 	Size            string `json:"size"`
 	VideoURL        string `json:"videoUrl" gorm:"type:text"`
+	StorageKey      string `json:"storageKey"`
+	FirstFrameURL   string `json:"firstFrameUrl" gorm:"type:text"`
+	FirstFrameKey   string `json:"firstFrameKey"`
+	LastFrameURL    string `json:"lastFrameUrl" gorm:"type:text"`
+	LastFrameKey    string `json:"lastFrameKey"`
+	MimeType        string `json:"mimeType"`
+	Bytes           int64  `json:"bytes"`
 	Error           string `json:"error" gorm:"type:text"`
 	ErrorDetail     string `json:"errorDetail" gorm:"type:text"`
 	RequestBody     string `json:"requestBody" gorm:"type:text"`

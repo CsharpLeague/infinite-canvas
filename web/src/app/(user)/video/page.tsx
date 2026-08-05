@@ -2,7 +2,7 @@
 import axios from "axios";
 
 import { AlertCircle, ArrowLeft, ArrowRight, BookOpen, CheckSquare, ChevronDown, ChevronUp, ClipboardPaste, CloudUpload, Copy, Download, FolderPlus, History, LoaderCircle, Music2, PanelBottom, PanelLeft, Plus, RotateCcw, SlidersHorizontal, Sparkles, Trash2, Upload, VideoIcon } from "lucide-react";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { App, Button, Checkbox, Empty, Input, Modal, Switch, Tag, Typography } from "antd";
 import localforage from "localforage";
 import { nanoid } from "nanoid";
@@ -119,6 +119,14 @@ export default function VideoPage() {
     const lastFrameInputRef = useRef<HTMLInputElement>(null);
     const effectiveConfig = useEffectiveConfig();
     const updateConfig = useConfigStore((state) => state.updateConfig);
+    const videoConfig = useMemo(() => ({ ...effectiveConfig, size: effectiveConfig.videoSize }), [effectiveConfig]);
+    const updateVideoConfig = useCallback<UpdateAiConfig>((key, value) => {
+        if (key === "size") {
+            updateConfig("videoSize", String(value));
+            return;
+        }
+        updateConfig(key, value);
+    }, [updateConfig]);
     const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const addAsset = useAssetStore((state) => state.addAsset);
@@ -149,12 +157,12 @@ export default function VideoPage() {
     const [syncingVideoIds, setSyncingVideoIds] = useState<string[]>([]);
     const pollingLogIdsRef = useRef(new Set<string>());
     const logsRef = useRef<GenerationLog[]>([]);
-    const effectiveConfigRef = useRef(effectiveConfig);
+    const effectiveConfigRef = useRef(videoConfig);
 
     const model = effectiveConfig.videoModel || effectiveConfig.model;
     const canGenerate = Boolean(prompt.trim());
     const pendingCount = results.filter((item) => item.status === "pending").length;
-    const klingWorkbench = resolveKlingWorkbenchConfig(effectiveConfig, model);
+    const klingWorkbench = resolveKlingWorkbenchConfig(videoConfig, model);
     const klingWorkbenchVariant = klingWorkbench?.variant || "";
     const klingWorkbenchProvider = klingWorkbench?.provider || "apimart";
     const isKlingWorkbench = Boolean(klingWorkbench);
@@ -209,8 +217,8 @@ export default function VideoPage() {
     }, [logs]);
 
     useEffect(() => {
-        effectiveConfigRef.current = effectiveConfig;
-    }, [effectiveConfig]);
+        effectiveConfigRef.current = videoConfig;
+    }, [videoConfig]);
 
     useEffect(() => {
         restorePendingLogResults(logs);
@@ -563,7 +571,7 @@ export default function VideoPage() {
         await submitGenerationSnapshot(snapshot);
     };
 
-    const buildRequestSnapshot = ({ promptText = prompt, negativePromptText, referenceItems = references, firstFrameItem = firstFrame, lastFrameItem = lastFrame, videoReferenceItems = videoReferences, audioReferenceItems = audioReferences, taskCountValue = taskCount, configValue = effectiveConfig, modelValue = model }: { promptText?: string; negativePromptText?: string; referenceItems?: ReferenceImage[]; firstFrameItem?: ReferenceImage | null; lastFrameItem?: ReferenceImage | null; videoReferenceItems?: ReferenceVideo[]; audioReferenceItems?: ReferenceAudio[]; taskCountValue?: number; configValue?: AiConfig; modelValue?: string } = {}) => {
+    const buildRequestSnapshot = ({ promptText = prompt, negativePromptText, referenceItems = references, firstFrameItem = firstFrame, lastFrameItem = lastFrame, videoReferenceItems = videoReferences, audioReferenceItems = audioReferences, taskCountValue = taskCount, configValue = videoConfig, modelValue = model }: { promptText?: string; negativePromptText?: string; referenceItems?: ReferenceImage[]; firstFrameItem?: ReferenceImage | null; lastFrameItem?: ReferenceImage | null; videoReferenceItems?: ReferenceVideo[]; audioReferenceItems?: ReferenceAudio[]; taskCountValue?: number; configValue?: AiConfig; modelValue?: string } = {}) => {
         const text = promptText.trim();
         const currentNegativePrompt = (negativePromptText ?? configValue.videoNegativePrompt ?? negativePrompt).trim();
         const klingV26 = isAPIMartKlingV26Config(configValue, modelValue);
@@ -626,7 +634,7 @@ export default function VideoPage() {
             const settled = await Promise.allSettled(pendingLogs.map((log) => runVideoTask(log, snapshot)));
             const nextLogs = settled
                 .map((item) => (item.status === "fulfilled" ? item.value : null))
-                .filter((item): item is GenerationLog => Boolean(item));
+                .filter((item): item is NonNullable<typeof item> => Boolean(item));
             const storedLogs = await readStoredLogs();
             setLogs(storedLogs);
             const createdCount = nextLogs.filter((item) => item.status === "生成中").length;
@@ -659,7 +667,7 @@ export default function VideoPage() {
 
     const retryResult = (result: GenerationResult) => {
         const retryChannelId = videoTaskChannelId(result.task);
-        const snapshot = buildRequestSnapshot({ promptText: result.prompt, negativePromptText: result.config.videoNegativePrompt || "", referenceItems: result.references, firstFrameItem: result.firstFrame, lastFrameItem: result.lastFrame, videoReferenceItems: result.videoReferences, audioReferenceItems: result.audioReferences, taskCountValue: 1, configValue: { ...effectiveConfig, ...result.config, ...(retryChannelId ? { videoChannelId: retryChannelId, activeChannelId: retryChannelId } : {}), model: result.model, videoModel: result.model }, modelValue: result.model });
+        const snapshot = buildRequestSnapshot({ promptText: result.prompt, negativePromptText: result.config.videoNegativePrompt || "", referenceItems: result.references, firstFrameItem: result.firstFrame, lastFrameItem: result.lastFrame, videoReferenceItems: result.videoReferences, audioReferenceItems: result.audioReferences, taskCountValue: 1, configValue: { ...videoConfig, ...result.config, ...(retryChannelId ? { videoChannelId: retryChannelId, activeChannelId: retryChannelId } : {}), model: result.model, videoModel: result.model }, modelValue: result.model });
         if (!snapshot) return;
         setResults((value) => value.filter((item) => item.id !== result.id));
         void submitGenerationSnapshot(snapshot);
@@ -682,7 +690,7 @@ export default function VideoPage() {
             updateConfig("videoChannelId", nextChannelId);
             updateConfig("activeChannelId", nextChannelId);
         }
-        if (result.config.size) updateConfig("size", result.config.size);
+        if (result.config.size) updateConfig("videoSize", result.config.size);
         if (result.config.vquality) updateConfig("vquality", result.config.vquality);
         if (result.config.videoSeconds) updateConfig("videoSeconds", result.config.videoSeconds);
         if (result.config.videoMode) updateConfig("videoMode", result.config.videoMode);
@@ -991,7 +999,7 @@ export default function VideoPage() {
             updateConfig("videoChannelId", nextChannelId);
             updateConfig("activeChannelId", nextChannelId);
         }
-        if (log.config.size) updateConfig("size", log.config.size);
+        if (log.config.size) updateConfig("videoSize", log.config.size);
         if (log.config.vquality) updateConfig("vquality", log.config.vquality);
         if (log.config.videoSeconds) updateConfig("videoSeconds", log.config.videoSeconds);
         if (log.config.videoMode) updateConfig("videoMode", log.config.videoMode);
@@ -1006,7 +1014,7 @@ export default function VideoPage() {
 
     const retryGenerationLog = (log: GenerationLog) => {
         const retryChannelId = videoTaskChannelId(log.task);
-        const snapshot = buildRequestSnapshot({ promptText: log.prompt, negativePromptText: log.config.videoNegativePrompt || "", referenceItems: log.references || [], firstFrameItem: log.firstFrame || null, lastFrameItem: log.lastFrame || null, videoReferenceItems: log.videoReferences || [], audioReferenceItems: log.audioReferences || [], taskCountValue: 1, configValue: { ...effectiveConfig, ...log.config, ...(retryChannelId ? { videoChannelId: retryChannelId, activeChannelId: retryChannelId } : {}), model: log.model, videoModel: log.model }, modelValue: log.model });
+        const snapshot = buildRequestSnapshot({ promptText: log.prompt, negativePromptText: log.config.videoNegativePrompt || "", referenceItems: log.references || [], firstFrameItem: log.firstFrame || null, lastFrameItem: log.lastFrame || null, videoReferenceItems: log.videoReferences || [], audioReferenceItems: log.audioReferences || [], taskCountValue: 1, configValue: { ...videoConfig, ...log.config, ...(retryChannelId ? { videoChannelId: retryChannelId, activeChannelId: retryChannelId } : {}), model: log.model, videoModel: log.model }, modelValue: log.model });
         if (!snapshot) return;
         void submitGenerationSnapshot(snapshot);
     };
@@ -1024,14 +1032,14 @@ export default function VideoPage() {
                                 prompt={prompt}
                                 negativePrompt={negativePrompt}
                                 references={references}
-                                config={effectiveConfig}
+                                config={videoConfig}
                                 model={model}
                                 canGenerate={canGenerate}
                                 running={running}
                                 pendingCount={pendingCount}
                                 taskCount={taskCount}
                                 onTaskCountChange={setTaskCount}
-                                updateConfig={updateConfig}
+                                updateConfig={updateVideoConfig}
                                 openConfigDialog={openConfigDialog}
                                 onLayoutChange={setWorkbenchLayout}
                                 onPromptChange={setPrompt}
@@ -1061,14 +1069,14 @@ export default function VideoPage() {
                             lastFrame={lastFrame}
                             videoReferences={videoReferences}
                             audioReferences={audioReferences}
-                            config={effectiveConfig}
+                            config={videoConfig}
                             model={model}
                             canGenerate={canGenerate}
                             running={running}
                             pendingCount={pendingCount}
                             taskCount={taskCount}
                             onTaskCountChange={setTaskCount}
-                            updateConfig={updateConfig}
+                            updateConfig={updateVideoConfig}
                             openConfigDialog={openConfigDialog}
                             onLayoutChange={setWorkbenchLayout}
                             onPromptChange={setPrompt}
@@ -1156,14 +1164,14 @@ export default function VideoPage() {
                             lastFrame={lastFrame}
                             videoReferences={videoReferences}
                             audioReferences={audioReferences}
-                            config={effectiveConfig}
+                            config={videoConfig}
                             model={model}
                             canGenerate={canGenerate}
                             running={running}
                             pendingCount={pendingCount}
                             taskCount={taskCount}
                             onTaskCountChange={setTaskCount}
-                            updateConfig={updateConfig}
+                            updateConfig={updateVideoConfig}
                             openConfigDialog={openConfigDialog}
                             onLayoutChange={setWorkbenchLayout}
                             onPromptChange={setPrompt}
@@ -1289,6 +1297,7 @@ function WorkbenchPanel({
     layout: WorkbenchLayout;
     currentLayout: WorkbenchLayout;
     prompt: string;
+    negativePrompt?: string;
     references: ReferenceImage[];
     firstFrame: ReferenceImage | null;
     lastFrame: ReferenceImage | null;
@@ -2305,7 +2314,7 @@ function parseTaskTimestamp(value: unknown) {
     return 0;
 }
 
-function isClientVideoTaskId(id?: string | null) {
+function isClientVideoTaskId(id?: string | null): id is string {
     return typeof id === "string" && id.startsWith("client_video_task_");
 }
 
@@ -2540,7 +2549,7 @@ async function safeResolveMediaUrl(storageKey: string, fallback: string) {
     }
 }
 
-async function safeResolveImageUrl(storageKey: string, fallback: string) {
+async function safeResolveImageUrl(storageKey: string | undefined, fallback: string) {
     try {
         return await resolveImageUrl(storageKey, fallback);
     } catch {
@@ -2691,6 +2700,7 @@ function buildLog({ prompt, model, config, references, firstFrame, lastFrame, vi
         videoMultiShot: config.videoMultiShot,
         videoShotType: config.videoShotType,
         videoMultiPrompt: normalizeKlingMultiPrompts(config.videoMultiPrompt),
+        videoElementList: config.videoElementList,
         videoGenerateAudio: config.videoGenerateAudio,
         videoWatermark: config.videoWatermark,
         videoCharacterOrientation: normalizeCharacterOrientation(config.videoCharacterOrientation),

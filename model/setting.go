@@ -11,22 +11,32 @@ const (
 
 // ModelChannel 模型渠道配置。
 type ModelChannel struct {
-	ID       string   `json:"id"`
-	Protocol string   `json:"protocol"`
-	Name     string   `json:"name"`
-	BaseURL  string   `json:"baseUrl"`
-	APIKey   string   `json:"apiKey"`
-	Models   []string `json:"models"`
-	Weight   int      `json:"weight"`
-	Timeout  int      `json:"timeout"`
-	Enabled  bool     `json:"enabled"`
-	Remark   string   `json:"remark"`
+	ID                   string   `json:"id"`
+	Protocol             string   `json:"protocol"`
+	Name                 string   `json:"name"`
+	BaseURL              string   `json:"baseUrl"`
+	APIKey               string   `json:"apiKey"`
+	AssetAccessKeyID     string   `json:"assetAccessKeyId"`
+	AssetSecretAccessKey string   `json:"assetSecretAccessKey"`
+	Models               []string `json:"models"`
+	Weight               int      `json:"weight"`
+	Timeout              int      `json:"timeout"`
+	Enabled              bool     `json:"enabled"`
+	Remark               string   `json:"remark"`
 }
 
 // ModelCost 模型算力点配置。
 type ModelCost struct {
-	Model   string `json:"model"`
-	Credits int    `json:"credits"`
+	Model       string         `json:"model"`
+	BillingMode string         `json:"billingMode"`
+	Credits     int            `json:"credits"`
+	VideoRates  VideoModelRate `json:"videoRates"`
+}
+
+type VideoModelRate struct {
+	P480  int `json:"480p"`
+	P720  int `json:"720p"`
+	P1080 int `json:"1080p"`
 }
 
 // PublicModelChannelSetting 公开模型渠道配置。
@@ -53,14 +63,31 @@ type SystemPromptSetting struct {
 }
 
 type PublicModelChannelInfo struct {
-	ID      string   `json:"id"`
-	Name    string   `json:"name"`
-	BaseURL string   `json:"baseUrl"`
-	Models  []string `json:"models"`
-	Weight  int      `json:"weight"`
-	Timeout int      `json:"timeout"`
-	Enabled bool     `json:"enabled"`
-	Remark  string   `json:"remark"`
+	ID                     string   `json:"id"`
+	Protocol               string   `json:"protocol"`
+	Name                   string   `json:"name"`
+	BaseURL                string   `json:"baseUrl"`
+	Models                 []string `json:"models"`
+	Weight                 int      `json:"weight"`
+	Timeout                int      `json:"timeout"`
+	Enabled                bool     `json:"enabled"`
+	Remark                 string   `json:"remark"`
+	VirtualPortraitEnabled bool     `json:"virtualPortraitEnabled"`
+}
+
+type VirtualPortraitTask struct {
+	ID                string `json:"id" gorm:"primaryKey"`
+	UserID            string `json:"userId" gorm:"index;uniqueIndex:idx_virtual_portrait_source"`
+	ChannelID         string `json:"channelId" gorm:"index;uniqueIndex:idx_virtual_portrait_source"`
+	SourceFingerprint string `json:"sourceFingerprint" gorm:"size:64;uniqueIndex:idx_virtual_portrait_source"`
+	SourceURL         string `json:"sourceUrl" gorm:"type:text"`
+	Name              string `json:"name"`
+	GroupID           string `json:"groupId" gorm:"index"`
+	AssetID           string `json:"assetId" gorm:"index"`
+	Status            string `json:"status" gorm:"index"`
+	Error             string `json:"error" gorm:"type:text"`
+	CreatedAt         string `json:"createdAt"`
+	UpdatedAt         string `json:"updatedAt"`
 }
 
 // PublicSetting 公开配置。

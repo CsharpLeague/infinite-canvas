@@ -38,7 +38,6 @@ export default function AdminAssetsPage() {
             type: "text",
             title: "",
             coverUrl: "",
-            tagText: "",
             category: "",
             description: "",
             content: "",

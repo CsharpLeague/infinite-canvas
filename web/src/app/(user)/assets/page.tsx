@@ -11,6 +11,8 @@ import { cn } from "@/lib/utils";
 import { useAssetStore, type Asset, type AssetKind } from "@/stores/use-asset-store";
 import { exportAssets, readAssetPackage } from "./asset-transfer";
 import { AssetFormModal } from "@/components/assets/asset-form-modal";
+import { deleteVirtualPortrait } from "@/services/api/virtual-portrait";
+import { deleteStoredImages } from "@/services/image-storage";
 
 const kindOptions = [
     { label: "全部", value: "all" },
@@ -104,11 +106,18 @@ export default function AssetsPage() {
         }
     };
 
-    const confirmDelete = () => {
+    const confirmDelete = async () => {
         if (!deletingAsset) return;
-        removeAsset(deletingAsset.id);
-        message.success("素材已删除");
-        setDeletingAsset(null);
+        try {
+            const portrait = deletingAsset.metadata?.type === "virtual_portrait" ? deletingAsset.metadata : null;
+            if (portrait && typeof portrait.taskId === "string") await deleteVirtualPortrait(portrait.taskId);
+            if (portrait && deletingAsset.kind === "image" && deletingAsset.data.storageKey) await deleteStoredImages([deletingAsset.data.storageKey], { force: true });
+            removeAsset(deletingAsset.id);
+            message.success("素材已删除");
+            setDeletingAsset(null);
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "删除素材失败");
+        }
     };
 
     return (
@@ -218,7 +227,7 @@ export default function AssetsPage() {
             <input ref={assetInputRef} type="file" accept="application/zip,.zip" className="hidden" onChange={(event) => void importAssetZip(event.target.files?.[0])} />
 
             <Modal title="删除素材" open={Boolean(deletingAsset)} onCancel={() => setDeletingAsset(null)} onOk={confirmDelete} okText="删除" okButtonProps={{ danger: true }} cancelText="取消">
-                确定删除「{deletingAsset?.title}」吗？删除后会从我的素材中移除。
+                {deletingAsset?.metadata?.type === "virtual_portrait" ? "删除后将同时移除火山虚拟人像、任务记录和云存储文件，画布中引用该文件的节点也会失效。确定继续吗？" : `确定删除「${deletingAsset?.title}」吗？删除后会从我的素材中移除。`}
             </Modal>
         </div>
     );

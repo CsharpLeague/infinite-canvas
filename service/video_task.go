@@ -1,18 +1,20 @@
 package service
 
 import (
+	"context"
+	"fmt"
 	"log"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/tigerowo/infinite-canvas/model"
 	"github.com/tigerowo/infinite-canvas/repository"
-	"github.com/google/uuid"
 )
 
 const videoTaskPollInterval = 5 * time.Second
-const videoTaskFinishedRetention = 10 * time.Minute
+const videoTaskFinishedRetention = 24 * time.Hour
 const videoTaskCleanupInterval = 10 * time.Minute
 
 var (
@@ -42,6 +44,13 @@ type VideoTaskCreateInput struct {
 	Seconds         string
 	Size            string
 	VideoURL        string
+	StorageKey      string
+	FirstFrameURL   string
+	FirstFrameKey   string
+	LastFrameURL    string
+	LastFrameKey    string
+	MimeType        string
+	Bytes           int64
 	Error           string
 	ErrorDetail     string
 	RequestBody     string
@@ -50,14 +59,16 @@ type VideoTaskCreateInput struct {
 }
 
 type VideoTaskPollUpdate struct {
-	Status       string
-	Progress     int
-	Seconds      string
-	Size         string
-	VideoURL     string
-	Error        string
-	ErrorDetail  string
-	ResponseBody string
+	Status        string
+	Progress      int
+	Seconds       string
+	Size          string
+	VideoURL      string
+	FirstFrameURL string
+	LastFrameURL  string
+	Error         string
+	ErrorDetail   string
+	ResponseBody  string
 }
 
 type VideoTaskPollFunc func(model.VideoTask) (VideoTaskPollUpdate, error)
@@ -85,6 +96,13 @@ func CreateVideoTask(input VideoTaskCreateInput) (model.VideoTask, error) {
 		Seconds:         strings.TrimSpace(input.Seconds),
 		Size:            strings.TrimSpace(input.Size),
 		VideoURL:        strings.TrimSpace(input.VideoURL),
+		StorageKey:      strings.TrimSpace(input.StorageKey),
+		FirstFrameURL:   strings.TrimSpace(input.FirstFrameURL),
+		FirstFrameKey:   strings.TrimSpace(input.FirstFrameKey),
+		LastFrameURL:    strings.TrimSpace(input.LastFrameURL),
+		LastFrameKey:    strings.TrimSpace(input.LastFrameKey),
+		MimeType:        strings.TrimSpace(input.MimeType),
+		Bytes:           input.Bytes,
 		Error:           strings.TrimSpace(input.Error),
 		ErrorDetail:     strings.TrimSpace(input.ErrorDetail),
 		RequestBody:     input.RequestBody,
@@ -95,6 +113,23 @@ func CreateVideoTask(input VideoTaskCreateInput) (model.VideoTask, error) {
 		UpdatedAt:       current,
 	}
 	if IsCompletedVideoTaskStatus(task.Status) || task.VideoURL != "" {
+		if task.VideoURL != "" && task.StorageKey == "" {
+			object, uploadErr := uploadGeneratedVideo(task.UserID, task.VideoURL)
+			if uploadErr != nil {
+				task.ErrorDetail = "视频自动上传云存储失败: " + uploadErr.Error()
+			} else {
+				task.VideoURL = object.URL
+				task.StorageKey = object.StorageKey
+				task.MimeType = object.MimeType
+				task.Bytes = object.Bytes
+			}
+		}
+		if task.FirstFrameURL != "" && task.FirstFrameKey == "" {
+			task.FirstFrameURL, task.FirstFrameKey = persistGeneratedVideoFrame(task.UserID, task.FirstFrameURL, "canvas-video-first-frame.png")
+		}
+		if task.LastFrameURL != "" && task.LastFrameKey == "" {
+			task.LastFrameURL, task.LastFrameKey = persistGeneratedVideoFrame(task.UserID, task.LastFrameURL, "canvas-video-last-frame.png")
+		}
 		task.Status = "completed"
 		task.Progress = 100
 		task.CompletedAt = current
@@ -103,7 +138,7 @@ func CreateVideoTask(input VideoTaskCreateInput) (model.VideoTask, error) {
 		task.CompletedAt = current
 	}
 	saved, err := repository.SaveVideoTask(task)
-	if err == nil && !IsCompletedVideoTaskStatus(saved.Status) && !IsFailedVideoTaskStatus(saved.Status) {
+	if err == nil && (saved.UpstreamTaskID != "" || saved.UpstreamVideoID != "") && !IsCompletedVideoTaskStatus(saved.Status) && !IsFailedVideoTaskStatus(saved.Status) {
 		WakeVideoTaskPoller()
 	}
 	return saved, err
@@ -131,32 +166,45 @@ func DeleteUserVideoTask(userID string, id string) error {
 
 func VideoTaskResponse(task model.VideoTask) map[string]any {
 	result := map[string]any{
-		"id":           task.ID,
-		"object":       "video",
-		"model":        task.Model,
-		"channelId":    task.ChannelID,
+		"id":            task.ID,
+		"object":        "video",
+		"model":         task.Model,
+		"channelId":     task.ChannelID,
 		"userChannelId": task.UserChannelID,
-		"channelName":  task.ChannelName,
-		"source":       task.Source,
-		"source_id":    task.SourceID,
-		"status":       task.Status,
-		"progress":     task.Progress,
-		"task_id":      firstVideoTaskValue(task.UpstreamTaskID, task.ID),
-		"video_id":     task.UpstreamVideoID,
-		"seconds":      task.Seconds,
-		"size":         task.Size,
-		"created_at":   task.CreatedAt,
-		"updated_at":   task.UpdatedAt,
-		"started_at":   task.StartedAt,
-		"completed_at": task.CompletedAt,
-		"createdAt":    task.CreatedAt,
-		"updatedAt":    task.UpdatedAt,
-		"request_body": task.RequestBody,
+		"channelName":   task.ChannelName,
+		"source":        task.Source,
+		"source_id":     task.SourceID,
+		"status":        task.Status,
+		"progress":      task.Progress,
+		"task_id":       firstVideoTaskValue(task.UpstreamTaskID, task.ID),
+		"video_id":      task.UpstreamVideoID,
+		"seconds":       task.Seconds,
+		"size":          task.Size,
+		"created_at":    task.CreatedAt,
+		"updated_at":    task.UpdatedAt,
+		"started_at":    task.StartedAt,
+		"completed_at":  task.CompletedAt,
+		"createdAt":     task.CreatedAt,
+		"updatedAt":     task.UpdatedAt,
+		"request_body":  task.RequestBody,
 	}
 	if task.VideoURL != "" {
 		result["url"] = task.VideoURL
 		result["video_url"] = task.VideoURL
 		result["data"] = []map[string]any{{"url": task.VideoURL}}
+		result["storageKey"] = task.StorageKey
+		result["mimeType"] = task.MimeType
+		result["bytes"] = task.Bytes
+	}
+	if task.FirstFrameURL != "" {
+		result["first_frame_url"] = task.FirstFrameURL
+		result["firstFrameUrl"] = task.FirstFrameURL
+		result["firstFrameStorageKey"] = task.FirstFrameKey
+	}
+	if task.LastFrameURL != "" {
+		result["last_frame_url"] = task.LastFrameURL
+		result["lastFrameUrl"] = task.LastFrameURL
+		result["lastFrameStorageKey"] = task.LastFrameKey
 	}
 	if IsFailedVideoTaskStatus(task.Status) && (task.Error != "" || task.ErrorDetail != "") {
 		result["error"] = map[string]any{"message": firstVideoTaskValue(task.Error, task.ErrorDetail)}
@@ -275,8 +323,14 @@ func UpdateVideoTaskFromPoll(task model.VideoTask, update VideoTaskPollUpdate) e
 	if strings.TrimSpace(update.Size) != "" {
 		task.Size = strings.TrimSpace(update.Size)
 	}
-	if strings.TrimSpace(update.VideoURL) != "" {
-		task.VideoURL = strings.TrimSpace(update.VideoURL)
+	if videoURL := strings.TrimSpace(update.VideoURL); videoURL != "" && task.StorageKey == "" {
+		task.VideoURL = videoURL
+	}
+	if frameURL := strings.TrimSpace(update.FirstFrameURL); frameURL != "" && task.FirstFrameKey == "" {
+		task.FirstFrameURL = frameURL
+	}
+	if frameURL := strings.TrimSpace(update.LastFrameURL); frameURL != "" && task.LastFrameKey == "" {
+		task.LastFrameURL = frameURL
 	}
 	if strings.TrimSpace(update.Error) != "" {
 		task.Error = strings.TrimSpace(update.Error)
@@ -299,8 +353,54 @@ func UpdateVideoTaskFromPoll(task model.VideoTask, update VideoTaskPollUpdate) e
 		task.Status = "failed"
 		task.CompletedAt = current
 	}
+	if _, err := repository.SaveVideoTask(task); err != nil || task.Status != "completed" {
+		return err
+	}
+
+	if task.VideoURL != "" && task.StorageKey == "" {
+		object, uploadErr := uploadGeneratedVideo(task.UserID, task.VideoURL)
+		if uploadErr != nil {
+			task.ErrorDetail = "视频自动上传云存储失败: " + uploadErr.Error()
+		} else {
+			task.VideoURL = object.URL
+			task.StorageKey = object.StorageKey
+			task.MimeType = object.MimeType
+			task.Bytes = object.Bytes
+		}
+	}
+	if task.FirstFrameURL != "" && task.FirstFrameKey == "" {
+		task.FirstFrameURL, task.FirstFrameKey = persistGeneratedVideoFrame(task.UserID, task.FirstFrameURL, "canvas-video-first-frame.png")
+	}
+	if task.LastFrameURL != "" && task.LastFrameKey == "" {
+		task.LastFrameURL, task.LastFrameKey = persistGeneratedVideoFrame(task.UserID, task.LastFrameURL, "canvas-video-last-frame.png")
+	}
+	task.UpdatedAt = now()
 	_, err := repository.SaveVideoTask(task)
 	return err
+}
+
+func uploadGeneratedVideo(userID string, videoURL string) (UploadedStorageObject, error) {
+	return uploadGeneratedMedia(userID, videoURL, "canvas-video.mp4")
+}
+
+func persistGeneratedVideoFrame(userID string, frameURL string, filename string) (string, string) {
+	object, err := uploadGeneratedMedia(userID, frameURL, filename)
+	if err != nil {
+		return frameURL, ""
+	}
+	return object.URL, object.StorageKey
+}
+
+func uploadGeneratedMedia(userID string, sourceURL string, filename string) (UploadedStorageObject, error) {
+	user, found, err := repository.GetUserByID(strings.TrimSpace(userID))
+	if err != nil {
+		return UploadedStorageObject{}, err
+	}
+	if !found {
+		return UploadedStorageObject{}, fmt.Errorf("用户不存在")
+	}
+	ctx := WithUser(context.Background(), model.PublicUser(user))
+	return UploadRemoteStorageObject(ctx, sourceURL, filename)
 }
 
 func NormalizeVideoTaskStatus(status string) string {

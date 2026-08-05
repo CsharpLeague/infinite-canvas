@@ -7,11 +7,13 @@ import { SYSTEM, Viewer } from "@photo-sphere-viewer/core";
 import "@photo-sphere-viewer/core/index.css";
 
 import { canvasThemes } from "@/lib/canvas-theme";
+import { getProxyUrl } from "@/services/image-storage";
 import { useThemeStore } from "@/stores/use-theme-store";
 
 type CanvasPanoramaViewerProps = {
     src: string;
     alt: string;
+    proxyGeneratedPanorama?: boolean;
     expandOnDoubleClick?: boolean;
     immersive?: boolean;
     onMoveStart?: (event: ReactMouseEvent<HTMLButtonElement>) => void;
@@ -21,6 +23,7 @@ type CanvasPanoramaViewerProps = {
 type PanoramaSurfaceProps = {
     src: string;
     alt: string;
+    proxyGeneratedPanorama: boolean;
     viewerEntry: PanoramaViewerEntry;
 };
 
@@ -61,9 +64,10 @@ function releasePanoramaViewer(entry: PanoramaViewerEntry) {
     if (index >= 0) activePanoramaViewers.splice(index, 1);
 }
 
-function PanoramaSurface({ src, alt, viewerEntry }: PanoramaSurfaceProps) {
+function PanoramaSurface({ src, alt, proxyGeneratedPanorama, viewerEntry }: PanoramaSurfaceProps) {
     const containerRef = useRef<HTMLDivElement>(null);
     const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
+    const panoramaSrc = proxyGeneratedPanorama ? getProxyUrl(src) : src;
 
     useEffect(() => {
         const container = containerRef.current;
@@ -108,7 +112,7 @@ function PanoramaSurface({ src, alt, viewerEntry }: PanoramaSurfaceProps) {
             SYSTEM.load();
             viewer = new Viewer({
                 container,
-                panorama: src,
+                panorama: panoramaSrc,
                 navbar: false,
                 mousewheel: true,
                 mousemove: true,
@@ -128,7 +132,7 @@ function PanoramaSurface({ src, alt, viewerEntry }: PanoramaSurfaceProps) {
         }
 
         return destroyViewer;
-    }, [src, viewerEntry]);
+    }, [panoramaSrc, viewerEntry]);
 
     return (
         <div className="relative h-full w-full overflow-hidden">
@@ -142,7 +146,7 @@ function PanoramaSurface({ src, alt, viewerEntry }: PanoramaSurfaceProps) {
     );
 }
 
-export default function CanvasPanoramaViewer({ src, alt, expandOnDoubleClick = false, immersive = false, onMoveStart, onOpen }: CanvasPanoramaViewerProps) {
+export default function CanvasPanoramaViewer({ src, alt, proxyGeneratedPanorama = false, expandOnDoubleClick = false, immersive = false, onMoveStart, onOpen }: CanvasPanoramaViewerProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const controlStyle = { background: theme.toolbar.panel, color: theme.toolbar.item };
     const [active, setActive] = useState<boolean | null>(null);
@@ -164,7 +168,7 @@ export default function CanvasPanoramaViewer({ src, alt, expandOnDoubleClick = f
     };
     const surface =
         active === null ? null : active ? (
-            <PanoramaSurface key={surfaceKey} src={src} alt={alt} viewerEntry={viewerEntryRef.current} />
+            <PanoramaSurface key={surfaceKey} src={src} alt={alt} proxyGeneratedPanorama={proxyGeneratedPanorama} viewerEntry={viewerEntryRef.current} />
         ) : (
             <img src={src} alt={alt} draggable={false} className="pointer-events-none h-full w-full select-none object-contain" />
         );

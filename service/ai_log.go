@@ -34,7 +34,7 @@ var (
 	htmlTagPattern        = regexp.MustCompile(`(?s)<[^>]+>`)
 	whitespacePattern     = regexp.MustCompile(`\s+`)
 	longDataURLPattern    = regexp.MustCompile(`data:image/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=\r\n]{512,}`)
-	longBase64TextPattern = regexp.MustCompile(`"[A-Za-z0-9+/=]{512,}"`)
+	longBase64TextPattern = regexp.MustCompile(`"[A-Za-z0-9+/=]{512,}"?`)
 
 	aiLogCleanupCron *cron.Cron
 	aiLogCleanupOnce sync.Once

@@ -36,11 +36,12 @@ type userModelConfigInput struct {
 }
 
 type userLocalModelChannelInput struct {
-	ID      string   `json:"id"`
-	Name    string   `json:"name"`
-	BaseURL string   `json:"baseUrl"`
-	APIKey  string   `json:"apiKey"`
-	Models  []string `json:"models"`
+	ID       string   `json:"id"`
+	Protocol string   `json:"protocol"`
+	Name     string   `json:"name"`
+	BaseURL  string   `json:"baseUrl"`
+	APIKey   string   `json:"apiKey"`
+	Models   []string `json:"models"`
 }
 
 func SelectUserLocalModelChannelForModel(userID string, modelName string, channelID string) (model.ModelChannel, error) {
@@ -81,14 +82,15 @@ func SelectUserLocalModelChannelForModel(userID string, modelName string, channe
 			return model.ModelChannel{}, errors.New("本地渠道不支持该模型")
 		}
 		return model.ModelChannel{
-			ID:      channelID,
-			Name:    firstVideoTaskValue(strings.TrimSpace(channel.Name), "本地直连"),
-			BaseURL: baseURL,
-			APIKey:  apiKey,
-			Models:  models,
-			Weight:  1,
-			Timeout: 600,
-			Enabled: true,
+			ID:       channelID,
+			Protocol: strings.TrimSpace(channel.Protocol),
+			Name:     firstVideoTaskValue(strings.TrimSpace(channel.Name), "本地直连"),
+			BaseURL:  baseURL,
+			APIKey:   apiKey,
+			Models:   models,
+			Weight:   1,
+			Timeout:  600,
+			Enabled:  true,
 		}, nil
 	}
 	return model.ModelChannel{}, errors.New("本地渠道不存在")

@@ -1,32 +1,69 @@
 "use client";
 
 import { ArrowRight } from "lucide-react";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ChangeEvent, useEffect, useRef, useState } from "react";
 import { App, Button, Image, Tag } from "antd";
+import { nanoid } from "nanoid";
+import { useRouter } from "next/navigation";
 
 import { fetchPrompts, type Prompt } from "@/services/api/prompts";
-import { navigationTools } from "@/constant/navigation-tools";
 import { cn } from "@/lib/utils";
+import { uploadAssetMediaFile } from "@/services/file-storage";
+import { uploadImage } from "@/services/image-storage";
+import { useEffectiveConfig } from "@/stores/use-config-store";
+import { AssetPickerModal } from "./canvas/components/asset-picker-modal";
+import { CanvasAssistantComposer } from "./canvas/components/canvas-assistant-composer";
+import { useCanvasStore } from "./canvas/stores/use-canvas-store";
+import { HomeBannerCarousel, type HomeBanner } from "./home-banner-carousel";
+import {
+    CanvasNodeType,
+    type CanvasAgentConfig,
+    type CanvasAssistantReference,
+    type InsertAssetPayload,
+    type PendingAgentAsset,
+} from "./canvas/types";
 
-function Highlighter({ action, color, children }: { action: "highlight" | "underline"; color: string; children: ReactNode }) {
-    return (
-        <span className="relative inline-block px-1">
-            {action === "highlight" ? (
-                <span className="absolute inset-x-0 bottom-0 top-1 rounded-sm opacity-45" style={{ backgroundColor: color }} />
-            ) : (
-                <span className="absolute inset-x-0 bottom-0 h-1 rounded-full opacity-80" style={{ backgroundColor: color }} />
-            )}
-            <span className="relative font-medium text-stone-800 dark:text-stone-200">{children}</span>
-        </span>
-    );
+
+const HOME_BANNERS: HomeBanner[] = [
+    { imageUrl: "https://gcore.jsdelivr.net/gh/tigerowo/infinite-canvas@v0.5.0/web/public/banners/agent.webp", videoUrl: "https://gcore.jsdelivr.net/gh/tigerowo/infinite-canvas@v0.5.0/web/public/banners/agent.webm", linkUrl: "", alt: "1" },
+    { imageUrl: "https://gcore.jsdelivr.net/gh/tigerowo/infinite-canvas@v0.5.0/web/public/banners/panorama.webp", videoUrl: "", linkUrl: "", alt: "2" },
+    { imageUrl: "https://gcore.jsdelivr.net/gh/tigerowo/infinite-canvas@v0.5.0/web/public/banners/3ddirector.webp", videoUrl: "", linkUrl: "", alt: "3" },
+];
+
+function toPendingAgentAsset(payload: InsertAssetPayload): PendingAgentAsset {
+    const nodeId = nanoid();
+    let reference: CanvasAssistantReference;
+    if (payload.kind === "text") {
+        reference = { id: nodeId, type: CanvasNodeType.Text, title: payload.title, text: payload.content };
+    } else {
+        const common = { id: nodeId, title: payload.title, storageKey: payload.storageKey, mimeType: payload.mimeType };
+        if (payload.kind === "image") reference = { ...common, type: CanvasNodeType.Image, dataUrl: payload.dataUrl };
+        else if (payload.kind === "video") reference = { ...common, type: CanvasNodeType.Video, url: payload.url };
+        else reference = { ...common, type: CanvasNodeType.Audio, url: payload.url };
+    }
+    return { nodeId, payload, reference };
 }
 
 export default function IndexPage() {
     const { message } = App.useApp();
-    const [primaryTool] = navigationTools;
+    const router = useRouter();
+    const effectiveConfig = useEffectiveConfig();
+    const createProject = useCanvasStore((state) => state.createProject);
+    const hydrated = useCanvasStore((state) => state.hydrated);
     const [promptShowcase, setPromptShowcase] = useState<Prompt[]>([]);
     const [previewIndex, setPreviewIndex] = useState(0);
     const [previewOpen, setPreviewOpen] = useState(false);
+    const [prompt, setPrompt] = useState("");
+    const [pendingAssets, setPendingAssets] = useState<PendingAgentAsset[]>([]);
+    const [assetPickerOpen, setAssetPickerOpen] = useState(false);
+    const [submitting, setSubmitting] = useState(false);
+    const [agentConfig, setAgentConfig] = useState<CanvasAgentConfig>(() => ({
+        imageQuality: effectiveConfig.quality,
+        imageSize: effectiveConfig.size,
+        videoQuality: effectiveConfig.vquality,
+        videoSize: effectiveConfig.videoSize,
+    }));
+    const uploadInputRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => {
         void fetchPrompts({ pageSize: 12 })
@@ -34,44 +71,86 @@ export default function IndexPage() {
             .catch((error) => message.error(error instanceof Error ? error.message : "获取提示词失败"));
     }, [message]);
 
-    return (
-        <main className="relative h-full overflow-y-auto bg-background bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] [background-size:16px_16px] text-stone-950 dark:bg-[radial-gradient(rgba(245,245,244,.18)_1px,transparent_1px)] dark:text-stone-100">
-            <section className="relative mx-auto min-h-[calc(100vh-4rem)] max-w-7xl overflow-hidden px-6">
-                <div className="pointer-events-none absolute left-[15%] top-24 size-20 rounded-full border border-dashed border-stone-200 dark:border-stone-800" />
-                <div className="pointer-events-none absolute right-[23%] top-[48%] size-20 rounded-full border border-dashed border-stone-200 dark:border-stone-800" />
+    const addPendingAsset = (payload: InsertAssetPayload) => {
+        setPendingAssets((current) => [...current, toPendingAgentAsset(payload)]);
+    };
 
-                <div className="relative flex min-h-[620px] flex-col items-center justify-center pt-10 text-center">
-                    <h1 className="ai-title-aurora max-w-5xl text-balance text-5xl font-semibold tracking-normal sm:text-7xl lg:text-8xl">无限画布</h1>
-                    <p className="mt-8 max-w-3xl text-balance text-lg leading-8 text-stone-500 dark:text-stone-400">
-                        在
-                        <Highlighter action="underline" color="#FF9800">
-                            无限画布
-                        </Highlighter>
-                        中生成、连接和重组
-                        <Highlighter action="highlight" color="#87CEFA">
-                            图片、文字与图形
-                        </Highlighter>
-                        ，让创作从单次生成变成连续推演。
-                    </p>
-                    <div className="mt-10 flex flex-wrap items-center justify-center gap-3">
-                        <Button type="primary" size="large" href={`/${primaryTool.slug}`} icon={<ArrowRight className="size-4" />} iconPlacement="end">
-                            开始使用
-                        </Button>
-                        <Button size="large" href="https://prompts.tdeh.top/" target="_blank">
-                            提示词仓库
-                        </Button>
+    const uploadFile = async (file: File) => {
+        try {
+            if (file.type.startsWith("image/")) {
+                const uploaded = await uploadImage(file);
+                addPendingAsset({ kind: "image", dataUrl: uploaded.url, title: file.name, ...uploaded });
+            } else if (file.type.startsWith("video/") || file.type.startsWith("audio/")) {
+                const uploaded = await uploadAssetMediaFile(file);
+                if (file.type.startsWith("video/")) addPendingAsset({ kind: "video", title: file.name, ...uploaded });
+                else addPendingAsset({ kind: "audio", title: file.name, ...uploaded });
+            } else {
+                throw new Error("仅支持图片、视频和音频文件");
+            }
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "素材上传失败");
+        }
+    };
+
+    const onUploadInputChange = (event: ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        event.target.value = "";
+        if (file) void uploadFile(file);
+    };
+
+    const submit = () => {
+        const text = prompt.trim();
+        if (!text || submitting) return;
+        if (!hydrated) {
+            message.info("画布数据正在加载，请稍后再试");
+            return;
+        }
+        setSubmitting(true);
+        const titles = new Set(useCanvasStore.getState().projects.map(({ title }) => title));
+        let title = "无限画布";
+        for (let i = 1; titles.has(title); i++) title = `无限画布 ${i}`;
+        const projectId = createProject(title, {
+            agentConfig,
+            pendingAgentRequest: { prompt: text, assets: pendingAssets },
+        });
+        router.push(`/canvas/${projectId}`);
+    };
+
+    return (
+        <main className="relative h-full overflow-x-hidden overflow-y-auto bg-background bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] [background-size:16px_16px] text-stone-950 dark:bg-[radial-gradient(rgba(245,245,244,.18)_1px,transparent_1px)] dark:text-stone-100">
+            <section className="relative mx-auto min-h-[calc(100vh-4rem)] max-w-7xl px-6">
+                <section className="relative flex min-h-[620px] flex-col items-center justify-center py-10 sm:py-14">
+                    <HomeBannerCarousel banners={HOME_BANNERS} />
+                    <div className="mt-12 w-full max-w-[820px]">
+                        <CanvasAssistantComposer
+                            prompt={prompt}
+                            isRunning={false}
+                            references={pendingAssets.map((asset) => asset.reference)}
+                            agentConfig={agentConfig}
+                            onAgentConfigChange={(patch) => setAgentConfig((current) => ({ ...current, ...patch }))}
+                            onPromptChange={setPrompt}
+                            onSubmit={submit}
+                            onOpenUpload={() => uploadInputRef.current?.click()}
+                            onOpenAssets={() => setAssetPickerOpen(true)}
+                            onRemoveReference={(id) => setPendingAssets((current) => current.filter((asset) => asset.nodeId !== id))}
+                            onPasteImage={(file) => void uploadFile(file)}
+                        />
                     </div>
-                </div>
+                    <input ref={uploadInputRef} hidden type="file" accept="image/*,video/*,audio/*" onChange={onUploadInputChange} />
+                </section>
 
                 <section className="relative mx-auto mb-20 max-w-6xl border-t border-stone-200 pt-12 dark:border-stone-800">
                     <div className="mb-8 grid gap-4 md:grid-cols-[1fr_auto_1fr] md:items-start">
                         <div />
                         <div className="max-w-2xl text-center">
-                            <h2 className="text-3xl font-semibold text-stone-950 dark:text-stone-100">沉淀每一次好结果</h2>
+                            <div className="flex flex-wrap items-center justify-center gap-3">
+                                <h2 className="text-3xl font-semibold text-stone-950 dark:text-stone-100">沉淀每一次好结果</h2>
+                                <Button type="primary" size="middle" href="https://prompts.tdeh.top/" target="_blank" className="-translate-y-[6px]">提示词仓库</Button>
+                            </div>
                             <p className="mt-3 text-base leading-7 text-stone-500 dark:text-stone-400">收藏稳定出图的提示词、参考风格和结果图片，让下一次创作从已有经验开始。</p>
                         </div>
                         <Button type="link" href="/prompts" className="justify-self-center md:justify-self-end" icon={<ArrowRight className="size-4" />} iconPlacement="end">
-                            查看提示词库
+                            提示词库
                         </Button>
                     </div>
                     <div className="grid auto-rows-[210px] gap-4 md:grid-cols-4">
@@ -106,20 +185,27 @@ export default function IndexPage() {
                     </div>
                 </section>
             </section>
+            <AssetPickerModal
+                open={assetPickerOpen}
+                defaultTab="my-assets"
+                onInsert={(payload) => {
+                    addPendingAsset(payload);
+                    setAssetPickerOpen(false);
+                }}
+                onClose={() => setAssetPickerOpen(false)}
+            />
             <Image.PreviewGroup
+                items={promptShowcase.map((item) => ({
+                    src: item.coverUrl,
+                    alt: item.title,
+                }))}
                 preview={{
                     open: previewOpen,
                     current: previewIndex,
                     onOpenChange: setPreviewOpen,
                     onChange: setPreviewIndex,
                 }}
-            >
-                <div className="hidden">
-                    {promptShowcase.map((item) => (
-                        <Image key={item.id} src={item.coverUrl} alt={item.title} />
-                    ))}
-                </div>
-            </Image.PreviewGroup>
+            />
         </main>
     );
 }

@@ -31,21 +31,22 @@ export type NodeGenerationInput = {
     image?: ReferenceImage;
     video?: ReferenceVideo;
     audio?: ReferenceAudio;
+    isVideoTailFrame?: boolean;
 };
 
 export function buildNodeGenerationContext(nodeId: string, nodes: CanvasNodeData[], connections: CanvasConnection[], prompt: string): NodeGenerationContext {
-    const inputs = buildNodeGenerationInputs(nodeId, nodes, connections);
     const sourceNode = nodes.find((node) => node.id === nodeId);
+    const inputs = buildNodeGenerationInputs(nodeId, nodes, connections);
     if (sourceNode?.type === CanvasNodeType.Config && Boolean(sourceNode.metadata?.composerContent?.trim())) {
         return buildComposerGenerationContext(inputs, prompt, sourceNode);
     }
 
     const advanced = buildCanvasVideoAdvancedContext(sourceNode, inputs);
-    const upstreamText = inputs
-        .filter((input) => !advanced.textNodeIds.has(input.nodeId))
-        .map((input) => input.text)
-        .filter(Boolean)
-        .join("\n\n");
+    const upstreamText = sourceNode?.metadata?.excludeUpstreamText? "": inputs
+            .filter((input) => !advanced.textNodeIds.has(input.nodeId))
+            .map((input) => input.text)
+            .filter(Boolean)
+            .join("\n\n");
     const referenceImages = inputs.filter((input) => !advanced.referenceNodeIds.has(input.nodeId)).map((input) => input.image).filter((image): image is ReferenceImage => Boolean(image));
     const referenceVideos = inputs.filter((input) => !advanced.referenceNodeIds.has(input.nodeId)).map((input) => input.video).filter((video): video is ReferenceVideo => Boolean(video));
     const referenceAudios = inputs.filter((input) => !advanced.referenceNodeIds.has(input.nodeId)).map((input) => input.audio).filter((audio): audio is ReferenceAudio => Boolean(audio));
@@ -70,7 +71,9 @@ export function buildNodeGenerationContext(nodeId: string, nodes: CanvasNodeData
 }
 
 function buildComposerGenerationContext(inputs: NodeGenerationInput[], prompt: string, sourceNode?: CanvasNodeData): NodeGenerationContext {
-    const advanced = buildCanvasVideoAdvancedContext(sourceNode, inputs);
+    const advanced = sourceNode?.metadata?.generationMode === "video"
+        ? buildCanvasVideoAdvancedContext(sourceNode, inputs)
+        : emptyCanvasVideoAdvancedContext();
     const inputByNodeId = new Map(inputs.map((input) => [input.nodeId, input]));
     const selectedInputs: NodeGenerationInput[] = [];
     const labelByNodeId = new Map<string, string>();
@@ -148,6 +151,16 @@ type CanvasVideoAdvancedContext = {
     videoElementList: VideoElementItem[];
 };
 
+function emptyCanvasVideoAdvancedContext(): CanvasVideoAdvancedContext {
+    return {
+        textNodeIds: new Set(),
+        referenceNodeIds: new Set(),
+        klingImageReferences: [],
+        videoMultiPrompt: [],
+        videoElementList: [],
+    };
+}
+
 function buildCanvasVideoAdvancedContext(sourceNode: CanvasNodeData | undefined, inputs: NodeGenerationInput[]): CanvasVideoAdvancedContext {
     const inputByNodeId = new Map(inputs.map((input) => [input.nodeId, input]));
     const textNodeIds = new Set<string>();
@@ -191,7 +204,13 @@ function inputToElementReference(input: NodeGenerationInput | undefined): VideoE
 }
 
 export function buildNodeGenerationInputs(nodeId: string, nodes: CanvasNodeData[], connections: CanvasConnection[]): NodeGenerationInput[] {
-    return getGenerationResourceNodes(nodeId, nodes, connections).flatMap((node): NodeGenerationInput[] => {
+    const sourceNode = nodes.find((node) => node.id === nodeId);
+    const resourceNodes = getGenerationResourceNodes(nodeId, nodes, connections);
+    const inputNodes = sourceNode?.metadata?.content && !resourceNodes.some((node) => node.id === sourceNode.id) ? [sourceNode, ...resourceNodes] : resourceNodes;
+    return inputNodes.flatMap((node): NodeGenerationInput[] => {
+        const referenceMode = sourceNode?.metadata?.videoReferenceModes?.[node.id] || (node.metadata?.lastFrameUrl ? "tail_frame" : "video");
+        const videoTailFrame = referenceMode === "tail_frame" ? readVideoTailFrame(node) : null;
+        if (videoTailFrame) return [{ nodeId: node.id, type: "image" as const, title: `${node.title || "视频"}尾帧`, image: videoTailFrame, isVideoTailFrame: true }];
         const image = readReferenceImage(node);
         if (image) return [{ nodeId: node.id, type: "image" as const, title: node.title, image }];
         const video = readReferenceVideo(node);
@@ -217,11 +236,12 @@ export function buildNodeChatMessages(context: NodeGenerationContext): ChatCompl
     ];
 }
 
-export async function hydrateNodeGenerationContext(context: NodeGenerationContext) {
-    const { imageToDataUrl } = await import("@/services/image-storage");
+export async function hydrateNodeGenerationContext(context: NodeGenerationContext, preferPublicImageUrl = false) {
+    const { imageToDataUrl, imageToVisionInputUrl } = await import("@/services/image-storage");
+    const hydrateReference = preferPublicImageUrl ? imageToVisionInputUrl : imageToDataUrl;
     return {
         ...context,
-        referenceImages: await Promise.all(context.referenceImages.map(async (image) => ({ ...image, dataUrl: await imageToDataUrl(image) }))),
+        referenceImages: await Promise.all(context.referenceImages.map(async (image) => ({ ...image, dataUrl: await hydrateReference(image) }))),
         firstFrame: context.firstFrame ? { ...context.firstFrame, dataUrl: await imageToDataUrl(context.firstFrame) } : null,
         lastFrame: context.lastFrame ? { ...context.lastFrame, dataUrl: await imageToDataUrl(context.lastFrame) } : null,
     };
@@ -247,6 +267,8 @@ function readReferenceImage(node: CanvasNodeData): ReferenceImage | null {
         type: node.metadata.mimeType || "image/png",
         dataUrl: node.metadata.content,
         storageKey: node.metadata.storageKey,
+        arkAssetId: node.metadata.arkAssetId,
+        arkChannelId: node.metadata.arkChannelId,
     };
 }
 
@@ -255,6 +277,17 @@ function readFrameReferences(node: CanvasNodeData | undefined, inputs: NodeGener
     return {
         firstFrame: node?.metadata?.firstFrameNodeId ? imageByNodeId.get(node.metadata.firstFrameNodeId) || null : null,
         lastFrame: node?.metadata?.lastFrameNodeId ? imageByNodeId.get(node.metadata.lastFrameNodeId) || null : null,
+    };
+}
+
+function readVideoTailFrame(node: CanvasNodeData): ReferenceImage | null {
+    if (node.type !== CanvasNodeType.Video || !node.metadata?.lastFrameUrl) return null;
+    return {
+        id: node.id,
+        name: `${node.title || node.id}-last-frame.png`,
+        type: "image/png",
+        dataUrl: node.metadata.lastFrameUrl,
+        storageKey: node.metadata.lastFrameStorageKey,
     };
 }
 

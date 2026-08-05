@@ -50,6 +50,26 @@ export function readImageMeta(dataUrl: string) {
     });
 }
 
+export function compressImageDataUrl(dataUrl: string, maxSide = 1600, quality = 0.85) {
+    return new Promise<string>((resolve) => {
+        const image = new Image();
+        image.onload = () => {
+            const scale = Math.min(1, maxSide / Math.max(image.naturalWidth, image.naturalHeight));
+            if (scale === 1 && getDataUrlByteSize(dataUrl) <= 2 * 1024 * 1024) {
+                resolve(dataUrl);
+                return;
+            }
+            const canvas = document.createElement("canvas");
+            canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+            canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+            canvas.getContext("2d")?.drawImage(image, 0, 0, canvas.width, canvas.height);
+            resolve(canvas.toDataURL("image/jpeg", quality));
+        };
+        image.onerror = () => resolve(dataUrl);
+        image.src = dataUrl;
+    });
+}
+
 export function dataUrlToFile(image: ReferenceImage) {
     const [header, content] = image.dataUrl.split(",", 2);
     const mimeType = header.match(/data:(.*?);base64/)?.[1] || image.type || "image/png";

@@ -10,6 +10,7 @@ import { useUserStore } from "@/stores/use-user-store";
 
 export type LocalModelChannel = {
     id: string;
+    protocol?: "openai" | "newapi" | "sub2api" | "ark" | "kie" | "agnes";
     name: string;
     baseUrl: string;
     apiKey: string;
@@ -52,6 +53,7 @@ export type AiConfig = {
     audioModels: string[];
     quality: string;
     size: string;
+    videoSize: string;
     count: string;
     canvasImageCount: string;
     timeout: string;
@@ -68,7 +70,7 @@ export type AiConfig = {
         workflowAgent: string;
     };
     localChannels: LocalModelChannel[];
-    publicChannels: Array<{ id?: string; name?: string; baseUrl?: string; models?: string[]; weight?: number; timeout?: number; enabled?: boolean; remark?: string }>;
+    publicChannels: Array<{ id?: string; protocol?: "openai" | "newapi" | "sub2api" | "ark" | "kie" | "agnes"; name?: string; baseUrl?: string; models?: string[]; weight?: number; timeout?: number; enabled?: boolean; remark?: string; virtualPortraitEnabled?: boolean }>;
     syncModelConfig: boolean;
     syncStorageConfig: boolean;
     activeChannelId: string;
@@ -102,7 +104,7 @@ export const defaultConfig: AiConfig = {
     videoMultiPrompt: [{ prompt: "", duration: "1" }],
     videoElementList: [{ name: "", description: "", references: [] }],
     vquality: "720",
-    videoGenerateAudio: "false",
+    videoGenerateAudio: "true",
     videoWatermark: "false",
     videoCharacterOrientation: "video",
     systemPrompt: "",
@@ -113,6 +115,7 @@ export const defaultConfig: AiConfig = {
     audioModels: [],
     quality: "auto",
     size: "1:1",
+    videoSize: "1280x720",
     count: "1",
     canvasImageCount: "1",
     timeout: "600",
@@ -340,6 +343,12 @@ export const useConfigStore = create<ConfigStore>()(
         }),
         {
             name: CONFIG_STORE_KEY,
+            version: 1,
+            migrate: (persistedState, version) => {
+                const state = (persistedState || {}) as Partial<ConfigStore>;
+                if (version >= 1 || !state.config) return state;
+                return { ...state, config: { ...state.config, videoGenerateAudio: "true" } };
+            },
             partialize: (state) => ({ config: state.config }),
             merge: (persisted, current) => {
                 const persistedState = (persisted || {}) as Partial<ConfigStore>;
@@ -380,7 +389,7 @@ export const useConfigStore = create<ConfigStore>()(
                         videoMultiPrompt: Array.isArray(config.videoMultiPrompt) && config.videoMultiPrompt.length ? config.videoMultiPrompt : defaultConfig.videoMultiPrompt,
                         videoElementList: Array.isArray(config.videoElementList) && config.videoElementList.length ? config.videoElementList : defaultConfig.videoElementList,
                         vquality: config.vquality || "720",
-                        videoGenerateAudio: config.videoGenerateAudio || "false",
+                        videoGenerateAudio: config.videoGenerateAudio || "true",
                         videoWatermark: config.videoWatermark || "false",
                         videoCharacterOrientation: config.videoCharacterOrientation === "image" ? "image" : "video",
                         canvasImageCount: config.canvasImageCount || "1",
@@ -434,10 +443,11 @@ function normalizeArkPlanBaseUrl(baseUrl: string) {
     }
 }
 
-export function normalizeLocalChannels(config: Partial<AiConfig>) {
+export function normalizeLocalChannels(config: Partial<AiConfig>): LocalModelChannel[] {
     const channels = Array.isArray(config.localChannels) ? config.localChannels : [];
     const normalized = channels.map((channel, index) => ({
         id: channel.id || `local-${index + 1}`,
+        protocol: channel.protocol,
         name: typeof channel.name === "string" ? channel.name : `本地渠道 ${index + 1}`,
         baseUrl: channel.baseUrl || "",
         apiKey: channel.apiKey || "",

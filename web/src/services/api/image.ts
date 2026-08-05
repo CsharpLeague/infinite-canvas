@@ -1,5 +1,6 @@
 import axios from "axios";
 
+import { friendlyAIErrorMessage } from "@/lib/ai-error-message";
 import { dataUrlToFile } from "@/lib/image-utils";
 import { imageToDataUrl, resolveImageUrl } from "@/services/image-storage";
 import { buildApiUrl, channelIdForActiveModel, localChannelForActiveModel, type AiConfig } from "@/stores/use-config-store";
@@ -13,7 +14,10 @@ export type ChatCompletionMessage = {
 };
 
 type ImageApiResponse = {
-    data?: Array<Record<string, unknown>>;
+    data?: unknown;
+    images?: unknown;
+    result?: unknown;
+    output?: unknown;
     error?: { message?: string };
     code?: number;
     msg?: string;
@@ -109,7 +113,6 @@ function normalizeBoundedInteger(value: string | number, fallback: number, min: 
     return Math.max(min, Math.min(max, number));
 }
 
-/** Map "quality + ratio" to an explicit pixel dimension like "3840x2160". Returns undefined when quality is auto. */
 function resolveSize(quality: string, ratio: string): string | undefined {
     const basePixels = QUALITY_BASE[quality];
     if (!basePixels || ratio === "auto" || !ratio) return undefined;
@@ -120,18 +123,16 @@ function resolveSize(quality: string, ratio: string): string | undefined {
     const h = Number(parts[1]);
     if (!w || !h) return undefined;
 
-    const targetPixels = basePixels * basePixels;
-    const isLandscape = w >= h;
-    const longRatio = isLandscape ? w / h : h / w;
+    let a = Math.round(w);
+    let b = Math.round(h);
+    while (b) {
+        const remainder = a % b;
+        a = b;
+        b = remainder;
+    }
 
-    const longSideRaw = Math.sqrt(targetPixels * longRatio);
-    const longSide = Math.floor(longSideRaw / 16) * 16;
-    const shortSide = Math.round(longSide / longRatio / 16) * 16;
-
-    const width = isLandscape ? longSide : shortSide;
-    const height = isLandscape ? shortSide : longSide;
-
-    return `${width}x${height}`;
+    const unit = Math.round(Math.sqrt((basePixels * basePixels) / ((w / a) * (h / a))) / 16) * 16;
+    return `${(w / a) * unit}x${(h / a) * unit}`;
 }
 
 function resolveRequestSize(quality: string | undefined, size: string) {
@@ -157,14 +158,29 @@ function normalizeBase64Image(value: string, fallbackMime: string) {
     return value.startsWith("data:") ? value : `data:${fallbackMime};base64,${value}`;
 }
 
-function resolveImageDataUrl(item: Record<string, unknown>, mime: string) {
-    if (typeof item.b64_json === "string" && item.b64_json) {
-        return normalizeBase64Image(item.b64_json, mime);
+function resolveImageDataUrl(item: unknown, mime: string) {
+    if (typeof item === "string" && item) {
+        return item.startsWith("http://") || item.startsWith("https://") || item.startsWith("data:") ? item : normalizeBase64Image(item, mime);
     }
-    if (typeof item.url === "string" && item.url) {
-        return item.url;
+    if (!item || typeof item !== "object") return null;
+    const record = item as Record<string, unknown>;
+    for (const key of ["b64_json", "base64", "image_base64", "image"]) {
+        if (typeof record[key] === "string" && record[key]) return normalizeBase64Image(record[key] as string, mime);
+    }
+    for (const key of ["url", "image_url"]) {
+        if (typeof record[key] === "string" && record[key]) return record[key] as string;
     }
     return null;
+}
+
+function collectImagePayloadItems(value: unknown, depth = 0): unknown[] {
+    if (depth > 4 || value == null) return [];
+    if (typeof value === "string") return [value];
+    if (Array.isArray(value)) return value.flatMap((item) => collectImagePayloadItems(item, depth + 1));
+    if (typeof value !== "object") return [];
+    const record = value as Record<string, unknown>;
+    if (resolveImageDataUrl(record, IMAGE_MIME)) return [record];
+    return ["data", "images", "result", "output"].flatMap((key) => collectImagePayloadItems(record[key], depth + 1));
 }
 
 function parseImagePayload(payload: ImageApiResponse, mime: string): GeneratedImage[] {
@@ -172,10 +188,10 @@ function parseImagePayload(payload: ImageApiResponse, mime: string): GeneratedIm
         throw new ImageRequestError(payload.msg || "请求失败", payload);
     }
     const images =
-        payload.data
-            ?.map((item) => resolveImageDataUrl(item, mime))
+        collectImagePayloadItems(payload)
+            .map((item) => resolveImageDataUrl(item, mime))
             .filter((value): value is string => Boolean(value))
-            .map((dataUrl) => ({ id: nanoid(), dataUrl })) || [];
+            .map((dataUrl) => ({ id: nanoid(), dataUrl }));
 
     if (images.length === 0) {
         throw new ImageRequestError("接口没有返回图片", payload);
@@ -357,6 +373,10 @@ function isEventStreamResponse(response: Response) {
     return response.headers.get("Content-Type")?.toLowerCase().includes("text/event-stream") ?? false;
 }
 
+function isEventStreamText(value: string) {
+    return /^\s*(?:event|data):/.test(value);
+}
+
 async function parseImagesStreamResponse(response: Response, mime: string): Promise<GeneratedImage[]> {
     const completedItems: Record<string, unknown>[] = [];
     let resultPayload: ImageApiResponse | null = null;
@@ -373,6 +393,25 @@ async function parseImagesStreamResponse(response: Response, mime: string): Prom
     if (resultPayload) return parseImagePayload(resultPayload, mime);
     if (completedItems.length) return parseImagePayload({ data: completedItems }, mime);
     throw new ImageRequestError("流式接口未返回最终图片数据", events);
+}
+
+async function parseImagesResponse(response: Response, mime: string): Promise<ParsedImageResponse> {
+    if (isEventStreamResponse(response)) {
+        const images = await parseImagesStreamResponse(response, mime);
+        return { images, responseBody: summarizeGeneratedImages(images, "event-stream") };
+    }
+    const text = await response.text();
+    if (isEventStreamText(text)) {
+        const images = await parseImagesStreamResponse(new Response(text, { headers: { "Content-Type": "text/event-stream" } }), mime);
+        return { images, responseBody: summarizeGeneratedImages(images, "event-stream") };
+    }
+    let payload: ImageApiResponse;
+    try {
+        payload = JSON.parse(text) as ImageApiResponse;
+    } catch (error) {
+        throw new ImageRequestError(error instanceof Error ? error.message : "图片响应解析失败", text);
+    }
+    return { images: parseImagePayload(payload, mime), responseBody: stringifyLogPayload(payload) };
 }
 
 async function parseResponsesStreamResponse(response: Response, mime: string): Promise<GeneratedImage[]> {
@@ -417,7 +456,12 @@ function parseStreamChunk(chunk: string, onDelta: (value: string) => void) {
             .find((line) => line.startsWith("data: "))
             ?.slice(6);
         if (!data || data === "[DONE]") continue;
-        const delta = (JSON.parse(data) as { choices?: Array<{ delta?: { content?: string } }> }).choices?.[0]?.delta?.content || "";
+        const payload = JSON.parse(data) as {
+            type?: string;
+            delta?: string;
+            choices?: Array<{ delta?: { content?: string } }>;
+        };
+        const delta = payload.choices?.[0]?.delta?.content || (payload.type === "response.output_text.delta" ? payload.delta : "") || "";
         deltaText += delta;
     }
     if (deltaText) onDelta(deltaText);
@@ -437,13 +481,13 @@ function usesAccountProxy(config: AiConfig) {
     return config.channelMode === "remote" || (config.channelMode === "local" && Boolean(token));
 }
 
-function aiApiUrl(config: AiConfig, path: string) {
+export function aiApiUrl(config: AiConfig, path: string) {
     if (usesAccountProxy(config)) return `/api/v1${path}`;
     const channel = localChannelForActiveModel(config);
     return buildApiUrl(channel?.baseUrl || config.baseUrl, path);
 }
 
-function aiHeaders(config: AiConfig, contentType?: string) {
+export function aiHeaders(config: AiConfig, contentType?: string) {
     const token = useUserStore.getState().token;
     if (config.channelMode === "remote" && !token) throw new Error("请先登录后再使用云端渠道");
     if (config.channelMode === "remote") {
@@ -467,7 +511,7 @@ function aiHeaders(config: AiConfig, contentType?: string) {
     };
 }
 
-function refreshRemoteUser(config: AiConfig) {
+export function refreshRemoteUser(config: AiConfig) {
     if (usesAccountProxy(config)) void useUserStore.getState().hydrateUser();
 }
 
@@ -580,15 +624,7 @@ async function requestImageGenerationSingle(config: AiConfig & { seedIndex?: num
                         }),
                     ),
                 ),
-            async (response) => {
-                if (config.streamImages && isEventStreamResponse(response)) {
-                    const images = await parseImagesStreamResponse(response, mime);
-                    return { images, responseBody: summarizeGeneratedImages(images, "event-stream") };
-                }
-                const payload = (await response.json()) as ImageApiResponse;
-                const images = parseImagePayload(payload, mime);
-                return { images, responseBody: stringifyLogPayload(payload) };
-            },
+            (response) => parseImagesResponse(response, mime),
         );
     }
 
@@ -599,7 +635,7 @@ async function requestImageGenerationSingle(config: AiConfig & { seedIndex?: num
     if (params.n > 1) body.n = params.n;
     if (params.size) body.size = params.size;
     if (params.quality && !config.codexCli) body.quality = params.quality;
-    if (config.responseFormatB64Json) body.response_format = "b64_json";
+    body.response_format = config.responseFormatB64Json ? "b64_json" : "url";
     if (config.streamImages) {
         body.stream = true;
         body.partial_images = params.streamPartialImages;
@@ -621,14 +657,7 @@ async function requestImageGenerationSingle(config: AiConfig & { seedIndex?: num
                     }),
                 ),
             ),
-        async (response) => {
-            if (config.streamImages && isEventStreamResponse(response)) {
-                const images = await parseImagesStreamResponse(response, mime);
-                return { images, responseBody: summarizeGeneratedImages(images, "event-stream") };
-            }
-            const payload = (await response.json()) as ImageApiResponse;
-            return { images: parseImagePayload(payload, mime), responseBody: stringifyLogPayload(payload) };
-        },
+        (response) => parseImagesResponse(response, mime),
     );
 }
 
@@ -640,7 +669,7 @@ async function requestImageEditSingle(config: AiConfig, prompt: string, referenc
     if (params.n > 1) formData.set("n", String(params.n));
     if (params.size) formData.set("size", params.size);
     if (params.quality && !config.codexCli) formData.set("quality", params.quality);
-    if (config.responseFormatB64Json) formData.set("response_format", "b64_json");
+    formData.set("response_format", config.responseFormatB64Json ? "b64_json" : "url");
     if (config.streamImages) {
         formData.set("stream", "true");
         formData.set("partial_images", String(params.streamPartialImages));
@@ -664,14 +693,7 @@ async function requestImageEditSingle(config: AiConfig, prompt: string, referenc
                     }),
                 ),
             ),
-        async (response) => {
-            if (config.streamImages && isEventStreamResponse(response)) {
-                const images = await parseImagesStreamResponse(response, mime);
-                return { images, responseBody: summarizeGeneratedImages(images, "event-stream") };
-            }
-            const payload = (await response.json()) as ImageApiResponse;
-            return { images: parseImagePayload(payload, mime), responseBody: stringifyLogPayload(payload) };
-        },
+        (response) => parseImagesResponse(response, mime),
     );
 }
 
@@ -803,8 +825,22 @@ export async function requestEdit(config: AiConfig & { seedIndex?: number; seedC
     }
 }
 
-export async function createCanvasImageTask(config: AiConfig & { seedIndex?: number; seedCount?: number }, prompt: string, references: ReferenceImage[], options: CanvasImageTaskOptions = {}) {
-    if (!usesAccountProxy(config)) throw new Error("请先登录后再使用任务恢复");
+export async function createCanvasImageTask(config: AiConfig & { seedIndex?: number; seedCount?: number }, prompt: string, references: ReferenceImage[], options: CanvasImageTaskOptions = {}): Promise<CanvasImageTask> {
+    if (!usesAccountProxy(config)) {
+        const [image] = await requestImages({ ...config, count: "1" }, prompt, references);
+        if (!image) throw new Error("接口没有返回图片");
+        return {
+            id: options.clientTaskId || nanoid(),
+            source: options.source || "canvas",
+            source_id: options.sourceId || "",
+            node_id: options.nodeId || "",
+            model: config.model,
+            prompt,
+            status: "completed",
+            progress: 100,
+            image_url: image.dataUrl,
+        };
+    }
     const params = createImageRequestParams({ ...config, count: "1" });
     const request = await createCanvasImageTaskRequest({ ...config, count: "1" }, prompt, references, params, options);
     const response = await fetch("/api/v1/canvas/image-tasks", request);
@@ -835,7 +871,7 @@ export async function pollCanvasImageTaskStatus(taskId: string): Promise<CanvasI
 
 async function createCanvasImageTaskRequest(config: AiConfig & { seedIndex?: number; seedCount?: number }, prompt: string, references: ReferenceImage[], params: ImageRequestParams, options: CanvasImageTaskOptions): Promise<RequestInit> {
     const taskChannelId = channelIdForActiveModel(config);
-    const taskChannelHeader = config.channelMode === "remote" && taskChannelId ? { "X-Model-Channel-ID": taskChannelId } : {};
+    const taskChannelHeader: Record<string, string> = config.channelMode === "remote" && taskChannelId ? { "X-Model-Channel-ID": taskChannelId } : {};
     const tokenHeaders = { ...aiHeaders(config), ...taskChannelHeader };
     const jsonHeaders = { ...aiHeaders(config, "application/json"), ...taskChannelHeader };
     const meta = { nodeId: options.nodeId || "", source: options.source || "canvas", sourceId: options.sourceId || "", clientTaskId: options.clientTaskId || "", prompt, channelId: taskChannelId };
@@ -890,7 +926,7 @@ async function createCanvasImageTaskRequest(config: AiConfig & { seedIndex?: num
         formData.set("prompt", withPromptGuard(config, withSystemPrompt(config, prompt)));
         if (params.n > 1) formData.set("n", String(params.n));
         if (params.quality && !config.codexCli) formData.set("quality", params.quality);
-        if (config.responseFormatB64Json) formData.set("response_format", "b64_json");
+        formData.set("response_format", config.responseFormatB64Json ? "b64_json" : "url");
         if (config.streamImages) {
             formData.set("stream", "true");
             formData.set("partial_images", String(params.streamPartialImages));
@@ -918,7 +954,7 @@ async function createCanvasImageTaskRequest(config: AiConfig & { seedIndex?: num
     };
     if (params.size) body.size = params.size;
     if (params.quality && !config.codexCli) body.quality = params.quality;
-    if (config.responseFormatB64Json) body.response_format = "b64_json";
+    body.response_format = config.responseFormatB64Json ? "b64_json" : "url";
     if (config.streamImages) {
         body.stream = true;
         body.partial_images = params.streamPartialImages;
@@ -987,7 +1023,7 @@ export async function requestImageQuestion(config: AiConfig, messages: ChatCompl
             });
         }
     } catch (error) {
-        throw new Error(readAxiosError(error, "请求失败"));
+        throw new Error(friendlyAIErrorMessage(readAxiosError(error, "请求失败"), "图片理解失败"));
     }
     refreshRemoteUser(config);
     return answer || "没有返回内容";
@@ -1101,15 +1137,7 @@ async function requestAgnesImageEdit(config: AiConfig & { seedIndex?: number; se
                     }),
                 ),
             ),
-        async (response) => {
-            if (config.streamImages && isEventStreamResponse(response)) {
-                const images = await parseImagesStreamResponse(response, mime);
-                return { images, responseBody: summarizeGeneratedImages(images, "event-stream") };
-            }
-            const payload = (await response.json()) as ImageApiResponse;
-            const images = parseImagePayload(payload, mime);
-            return { images, responseBody: stringifyLogPayload(payload) };
-        },
+        (response) => parseImagesResponse(response, mime),
     );
 }
 

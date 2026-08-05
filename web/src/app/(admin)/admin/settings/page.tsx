@@ -44,7 +44,16 @@ const emptySettings: AdminSettings = {
     },
     private: { channels: [], promptSync: { enabled: true, cron: "0 0 * * *" }, aiLog: { localDirectReportEnabled: false, cleanup: { enabled: false, retentionDays: 14, cron: "0 3 * * *" } }, auth: { linuxDo: { clientId: "", clientSecret: "" } }, storage: { mode: "local_indexeddb", allowUserProvider: false, allowUserGlobalProvider: true, providers: [], roundRobinCursor: 0, capacityCheck: { enabled: false, cron: "0 */6 * * *" }, capacityLimitBytes: 9 * 1024 * 1024 * 1024 } },
 };
-const emptyChannel: AdminModelChannel = { id: "", protocol: "openai", name: "", baseUrl: "", apiKey: "", models: [], weight: 1, timeout: 600, enabled: true, remark: "" };
+const emptyChannel: AdminModelChannel = { id: "", protocol: "openai", name: "", baseUrl: "", apiKey: "", assetAccessKeyId: "", assetSecretAccessKey: "", models: [], weight: 1, timeout: 600, enabled: true, remark: "" };
+const channelProtocolOptions = [
+    { label: "通用 OpenAI", value: "openai" },
+    { label: "New API", value: "newapi" },
+    { label: "Sub2API", value: "sub2api" },
+    { label: "火山方舟", value: "ark" },
+    { label: "KIE", value: "kie" },
+    { label: "Agnes", value: "agnes" },
+];
+const channelProtocolLabels = Object.fromEntries(channelProtocolOptions.map((item) => [item.value, item.label]));
 const emptyStorageProvider: AdminStorageProvider = { id: "", name: "", type: "s3", endpoint: "", region: "auto", bucket: "", accessKeyId: "", secretAccessKey: "", publicBaseUrl: "", pathPrefix: "canvas", weight: 1, enabled: true, ownerUserId: "", capacityBytes: 0, capacityCheckedAt: "", capacityExceeded: false };
 
 type SettingsTabKey = "public" | "private";
@@ -60,7 +69,9 @@ export default function AdminSettingsPage() {
     const [jsonText, setJsonText] = useState<Record<SettingsTabKey, string>>({ public: "", private: "" });
     const [channels, setChannels] = useState<AdminModelChannel[]>([]);
     const [channelForm] = Form.useForm<AdminModelChannel>();
+    const [assetCredentials, setAssetCredentials] = useState({ accessKeyId: "", secretAccessKey: "" });
     const [editingChannelIndex, setEditingChannelIndex] = useState<number | null>(null);
+    const [editingChannelProtocol, setEditingChannelProtocol] = useState(emptyChannel.protocol);
     const [isChannelDrawerOpen, setIsChannelDrawerOpen] = useState(false);
     const [testChannelIndex, setTestChannelIndex] = useState<number | null>(null);
     const [testKeyword, setTestKeyword] = useState("");
@@ -185,6 +196,8 @@ export default function AdminSettingsPage() {
         setEditingChannelIndex(index);
         setIsChannelDrawerOpen(true);
         const channel = index === null ? emptyChannel : normalizeChannel(channels[index]);
+        setEditingChannelProtocol(channel.protocol);
+        setAssetCredentials({ accessKeyId: channel.assetAccessKeyId, secretAccessKey: channel.assetSecretAccessKey });
         channelForm.setFieldsValue(channel);
         rememberModels(channel.models);
     };
@@ -192,11 +205,22 @@ export default function AdminSettingsPage() {
     const closeChannelDrawer = () => {
         setIsChannelDrawerOpen(false);
         setEditingChannelIndex(null);
+        setEditingChannelProtocol(emptyChannel.protocol);
+        setAssetCredentials({ accessKeyId: "", secretAccessKey: "" });
         channelForm.resetFields();
     };
 
     const saveChannel = async () => {
-        const channel = normalizeChannel(await channelForm.validateFields());
+        await channelForm.validateFields();
+        const channel = normalizeChannel({
+            ...channelForm.getFieldsValue(true),
+            assetAccessKeyId: assetCredentials.accessKeyId,
+            assetSecretAccessKey: assetCredentials.secretAccessKey,
+        });
+        if (channel.protocol === "ark" && Boolean(channel.assetAccessKeyId) !== Boolean(channel.assetSecretAccessKey)) {
+            message.error("素材 Access Key ID 和 Secret Access Key 必须同时填写");
+            return;
+        }
         rememberModels(channel.models);
         const nextChannels = [...channels];
         if (editingChannelIndex === null) nextChannels.push(channel);
@@ -434,7 +458,7 @@ export default function AdminSettingsPage() {
 
                     {activeTab === "public" ? (
                         activeMode === "visual" ? (
-                            <Form form={form} layout="vertical" initialValues={emptySettings} requiredMark={false}>
+                            <Form form={form} layout="vertical" initialValues={emptySettings} requiredMark={false} autoComplete="off">
                                 <Row gutter={16}>
                                     <Col span={24}>
                                         <Form.Item name={["public", "modelChannel", "availableModels"]} label="系统可用模型(请先在私有配置里配置渠道)" extra="可选项来自已启用渠道中选择的模型，最终开放哪些模型由这里勾选决定">
@@ -515,14 +539,34 @@ export default function AdminSettingsPage() {
                                             rowKey="model"
                                             pagination={false}
                                             size="small"
-                                            dataSource={publicModels.map((model) => ({ model, credits: modelCostCredits(modelCosts, model) }))}
+                                            dataSource={publicModels.map((model) => modelCostItem(modelCosts, model))}
                                             columns={[
                                                 { title: "模型", dataIndex: "model" },
                                                 {
-                                                    title: "每次调用扣除",
-                                                    dataIndex: "credits",
-                                                    width: 220,
-                                                    render: (_, item) => (
+                                                    title: "计费方式",
+                                                    dataIndex: "billingMode",
+                                                    width: 160,
+                                                    render: (_, item) => <Select className="!w-full" value={item.billingMode} options={[{ label: "固定扣费", value: "fixed" }, { label: "视频按秒", value: "video" }]} onChange={(value) => setModelCost(form, setModelCosts, item.model, { billingMode: value })} />,
+                                                },
+                                                {
+                                                    title: "扣除算力点",
+                                                    width: 520,
+                                                    render: (_, item) => item.billingMode === "video" ? (
+                                                        <Space size={12} wrap>
+                                                            {(["480p", "720p", "1080p"] as const).map((resolution) => (
+                                                                <Space.Compact key={resolution}>
+                                                                    <span className="flex h-8 items-center rounded-l-md border border-r-0 border-stone-200 bg-stone-50 px-3 text-sm text-stone-500 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300">{resolution}</span>
+                                                                    <InputNumber min={0} step={1} precision={0} className="!w-24" value={item.videoRates[resolution]} onChange={(value) => setModelCost(form, setModelCosts, item.model, { videoRates: { ...item.videoRates, [resolution]: Number(value) || 0 } })} />
+                                                                    <span className="flex h-8 items-center rounded-r-md border border-l-0 border-stone-200 bg-stone-50 px-3 text-sm text-stone-500 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300">点/秒</span>
+                                                                </Space.Compact>
+                                                            ))}
+                                                            <Space.Compact>
+                                                                <span className="flex h-8 items-center rounded-l-md border border-r-0 border-stone-200 bg-stone-50 px-3 text-sm text-stone-500 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300">回退</span>
+                                                                <InputNumber min={0} step={1} precision={0} className="!w-24" value={item.credits} onChange={(value) => setModelCost(form, setModelCosts, item.model, Number(value) || 0)} />
+                                                                <span className="flex h-8 items-center rounded-r-md border border-l-0 border-stone-200 bg-stone-50 px-3 text-sm text-stone-500 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300">点</span>
+                                                            </Space.Compact>
+                                                        </Space>
+                                                    ) : (
                                                         <Space.Compact className="!w-full">
                                                             <InputNumber min={0} step={1} precision={0} className="!w-full" value={item.credits} onChange={(value) => setModelCost(form, setModelCosts, item.model, Number(value) || 0)} />
                                                             <span className="flex h-8 items-center rounded-r-md border border-l-0 border-stone-200 bg-stone-50 px-3 text-sm text-stone-500 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300">
@@ -550,7 +594,7 @@ export default function AdminSettingsPage() {
                             </div>
                         )
                     ) : activeMode === "visual" ? (
-                        <Form form={form} layout="vertical" initialValues={emptySettings} requiredMark={false}>
+                        <Form form={form} layout="vertical" initialValues={emptySettings} requiredMark={false} autoComplete="off">
                             <Flex vertical gap={12}>
                                 <Card
                                     size="small"
@@ -581,7 +625,7 @@ export default function AdminSettingsPage() {
                                             </Col>
                                             <Col xs={24} md={9}>
                                                 <Form.Item name={["private", "auth", "linuxDo", "clientSecret"]} label="Linux.do Client Secret">
-                                                    <Input.Password placeholder="留空则沿用已保存的密钥" />
+                                                    <Input.Password name="linuxdo_client_secret_config" autoComplete="new-password" data-1p-ignore data-lpignore="true" placeholder="留空则沿用已保存的密钥" />
                                                 </Form.Item>
                                             </Col>
                                         </Row>
@@ -711,7 +755,7 @@ export default function AdminSettingsPage() {
                                                             </Col>
                                                             <Col xs={24} md={6}>
                                                                 <Form.Item name={[field.name, "secretAccessKey"]} label="Secret Access Key">
-                                                                    <Input.Password placeholder="留空沿用已保存密钥" />
+                                                                    <Input.Password name={`storage_secret_${field.key}`} autoComplete="new-password" data-1p-ignore data-lpignore="true" placeholder="留空沿用已保存密钥" />
                                                                 </Form.Item>
                                                             </Col>
                                                             <Col xs={24} md={6}>
@@ -760,7 +804,7 @@ export default function AdminSettingsPage() {
                                     dataSource={channelTableData}
                                     columns={[
                                         { title: "名称", dataIndex: "name", render: (value) => value || "未命名渠道" },
-                                        { title: "协议", dataIndex: "protocol", width: 96, render: (value) => <Tag>{value || "openai"}</Tag> },
+                                        { title: "渠道类型", dataIndex: "protocol", width: 112, render: (value) => <Tag>{channelProtocolLabels[value] || value || "通用 OpenAI"}</Tag> },
                                         { title: "状态", dataIndex: "enabled", width: 96, render: (value) => <Tag color={value ? "success" : "default"}>{value ? "已启用" : "已停用"}</Tag> },
                                         {
                                             title: "模型",
@@ -832,7 +876,17 @@ export default function AdminSettingsPage() {
                     }
                     destroyOnHidden
                 >
-                    <Form form={channelForm} layout="vertical" requiredMark={false} initialValues={emptyChannel}>
+                    <Form form={channelForm} layout="vertical" requiredMark={false} initialValues={emptyChannel} autoComplete="off">
+                        {editingChannelProtocol === "ark" ? (
+                            <div className="mb-4 rounded-xl border border-dashed border-stone-300 p-4 dark:border-stone-700">
+                                <Form.Item name="assetAccessKeyId" label="素材 Access Key ID" className="!mb-3">
+                                    <Input.Password name="ark_asset_access_key_id" autoComplete="new-password" data-1p-ignore data-lpignore="true" onChange={(event) => setAssetCredentials((current) => ({ ...current, accessKeyId: event.target.value }))} placeholder={editingChannelIndex === null ? "" : "留空则沿用已保存的 Access Key ID"} />
+                                </Form.Item>
+                                <Form.Item name="assetSecretAccessKey" label="素材 Secret Access Key" extra="两个字段都配置后才启用虚拟人像入库；用于火山方舟素材 OpenAPI 的 AK/SK 签名。" className="!mb-0">
+                                    <Input.Password name="ark_asset_secret_access_key" autoComplete="new-password" data-1p-ignore data-lpignore="true" onChange={(event) => setAssetCredentials((current) => ({ ...current, secretAccessKey: event.target.value }))} placeholder={editingChannelIndex === null ? "" : "留空则沿用已保存的 Secret Access Key"} />
+                                </Form.Item>
+                            </div>
+                        ) : null}
                         <Row gutter={16}>
                             <Col span={12}>
                                 <Form.Item name="name" label="渠道名称" rules={[{ required: true, message: "请输入渠道名称" }]}>
@@ -840,13 +894,8 @@ export default function AdminSettingsPage() {
                                 </Form.Item>
                             </Col>
                             <Col span={12}>
-                                <Form.Item name="protocol" label="协议">
-                                    <Select
-                                        options={[
-                                            { label: "OpenAI", value: "openai" },
-                                            { label: "KIE", value: "kie" },
-                                        ]}
-                                    />
+                                <Form.Item name="protocol" label="渠道类型" extra="New API 使用标准 OpenAI 接口；Sub2API 主要使用 Responses；Agnes Video 使用 Agnes 官方异步视频接口。">
+                                    <Select options={channelProtocolOptions} onChange={setEditingChannelProtocol} />
                                 </Form.Item>
                             </Col>
                             <Col span={12}>
@@ -871,7 +920,7 @@ export default function AdminSettingsPage() {
                             </Col>
                             <Col span={24}>
                                 <Form.Item name="apiKey" label="API Key" rules={editingChannelIndex === null ? [{ required: true, message: "请输入 API Key" }] : []}>
-                                    <Input.Password placeholder={editingChannelIndex === null ? "" : "留空则沿用已保存的 API Key"} />
+                                    <Input.Password name="model_channel_api_key" autoComplete="new-password" data-1p-ignore data-lpignore="true" placeholder={editingChannelIndex === null ? "" : "留空则沿用已保存的 API Key"} />
                                 </Form.Item>
                             </Col>
                             <Col span={24}>
@@ -983,7 +1032,7 @@ export default function AdminSettingsPage() {
                     destroyOnHidden
                 >
                     <Flex vertical gap={12}>
-                        <Typography.Text type="secondary">测试会向选中模型发送一条 hi，用于确认渠道是否有响应。</Typography.Text>
+                        <Typography.Text type="secondary">文本模型会发送最小文本请求；图片、视频和 KIE 模型只检查连接、鉴权与模型配置，不会创建收费任务。</Typography.Text>
                         <Input.Search placeholder="搜索模型..." allowClear value={testKeyword} onChange={(event) => setTestKeyword(event.target.value)} />
                         <Table
                             rowKey="model"
@@ -1076,7 +1125,16 @@ function normalizePublicSetting(setting: Partial<AdminSettings["public"]> = {}):
 }
 
 function normalizeModelCosts(items: Partial<AdminSettings["public"]["modelChannel"]["modelCosts"][number]>[]) {
-    return items.filter((item) => item.model).map((item) => ({ model: item.model || "", credits: Math.max(0, Number(item.credits) || 0) }));
+    return items.filter((item) => item.model).map((item) => ({
+        model: item.model || "",
+        billingMode: item.billingMode === "video" ? "video" as const : "fixed" as const,
+        credits: Math.max(0, Number(item.credits) || 0),
+        videoRates: {
+            "480p": Math.max(0, Number(item.videoRates?.["480p"]) || 0),
+            "720p": Math.max(0, Number(item.videoRates?.["720p"]) || 0),
+            "1080p": Math.max(0, Number(item.videoRates?.["1080p"]) || 0),
+        },
+    }));
 }
 
 function normalizePrivateSetting(setting: Partial<AdminSettings["private"]> = {}): AdminSettings["private"] {
@@ -1137,6 +1195,8 @@ function normalizeChannel(item: Partial<AdminModelChannel> = {}): AdminModelChan
         name: item.name || "",
         baseUrl: item.baseUrl || "",
         apiKey: item.apiKey || "",
+        assetAccessKeyId: item.assetAccessKeyId || "",
+        assetSecretAccessKey: item.assetSecretAccessKey || "",
         models: item.models || [],
         weight: Math.max(1, Number(item.weight) || 1),
         timeout: Math.max(1, Number(item.timeout) || 600),
@@ -1145,14 +1205,15 @@ function normalizeChannel(item: Partial<AdminModelChannel> = {}): AdminModelChan
     };
 }
 
-function modelCostCredits(items: AdminSettings["public"]["modelChannel"]["modelCosts"], model: string) {
-    return items.find((item) => item.model === model)?.credits || 0;
+function modelCostItem(items: AdminModelCost[], model: string): AdminModelCost {
+    return items.find((item) => item.model === model) || { model, billingMode: "fixed", credits: 0, videoRates: { "480p": 0, "720p": 0, "1080p": 0 } };
 }
 
-function setModelCost(form: any, setModelCosts: (items: AdminModelCost[]) => void, model: string, credits: number) {
-    const current = (form.getFieldValue(["public", "modelChannel", "modelCosts"]) || []) as AdminSettings["public"]["modelChannel"]["modelCosts"];
+function setModelCost(form: any, setModelCosts: (items: AdminModelCost[]) => void, model: string, patch: Partial<AdminModelCost> | number) {
+    const current = normalizeModelCosts((form.getFieldValue(["public", "modelChannel", "modelCosts"]) || []) as AdminModelCost[]);
+    const item = modelCostItem(current, model);
     const next = current.filter((item) => item.model !== model);
-    next.push({ model, credits: Math.max(0, credits) });
+    next.push(typeof patch === "number" ? { ...item, credits: Math.max(0, patch) } : { ...item, ...patch });
     form.setFieldValue(["public", "modelChannel", "modelCosts"], next);
     setModelCosts(next);
 }
@@ -1161,6 +1222,8 @@ function mergeChannelApiKeys(currentChannels: AdminModelChannel[], saved: AdminS
     const channels = saved.private.channels.map((item, index) => ({
         ...item,
         apiKey: currentChannels[index]?.apiKey || item.apiKey,
+        assetAccessKeyId: currentChannels[index]?.assetAccessKeyId || item.assetAccessKeyId,
+        assetSecretAccessKey: currentChannels[index]?.assetSecretAccessKey || item.assetSecretAccessKey,
     }));
     return {
         public: saved.public,

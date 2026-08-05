@@ -138,7 +138,14 @@ func proxyAIRequest(w http.ResponseWriter, r *http.Request, path string) {
 		credits *= readAIRequestCount(body, contentType)
 	}
 	upstreamPath := resolveAIProxyPath(channel, modelName, path)
-	if isKIEChannel(channel, modelName) && upstreamPath == "/jobs/createTask" {
+	if isSub2APITextRequest(channel, path) {
+		body, contentType, err = normalizeSub2APITextBody(body, contentType)
+		if err != nil {
+			log.Printf("AI proxy normalize Sub2API text request failed: model=%s err=%v", modelName, err)
+			Fail(w, "AI 接口请求失败")
+			return
+		}
+	} else if isKIEChannel(channel, modelName) && upstreamPath == "/jobs/createTask" {
 		body, contentType, err = normalizeKIEVideoBody(body, contentType, modelName, channel)
 		if err != nil {
 			log.Printf("AI proxy normalize KIE request failed: model=%s err=%v", modelName, err)
@@ -474,7 +481,7 @@ func readAIRequestCount(body []byte, contentType string) int {
 }
 
 func resolveAIProxyURL(channel model.ModelChannel, modelName string, path string) string {
-	if videoID, ok := agnesVideoQueryID(modelName, path); ok {
+	if videoID, ok := agnesVideoQueryID(channel, modelName, path); ok {
 		baseURL := strings.TrimRight(strings.TrimSpace(channel.BaseURL), "/")
 		if strings.HasSuffix(strings.ToLower(baseURL), "/v1") {
 			baseURL = strings.TrimRight(baseURL[:len(baseURL)-len("/v1")], "/")
@@ -487,8 +494,8 @@ func resolveAIProxyURL(channel model.ModelChannel, modelName string, path string
 	return service.BuildModelChannelURL(channel, path)
 }
 
-func agnesVideoQueryID(modelName string, path string) (string, bool) {
-	if !isAgnesVideoModel(modelName) || !strings.HasPrefix(path, "/videos/") || strings.HasSuffix(path, "/content") {
+func agnesVideoQueryID(channel model.ModelChannel, modelName string, path string) (string, bool) {
+	if !isAgnesVideoChannel(channel, modelName) || !strings.HasPrefix(path, "/videos/") || strings.HasSuffix(path, "/content") {
 		return "", false
 	}
 	id := strings.TrimPrefix(path, "/videos/")
@@ -499,6 +506,9 @@ func agnesVideoQueryID(modelName string, path string) (string, bool) {
 }
 
 func resolveAIProxyPath(channel model.ModelChannel, modelName string, path string) string {
+	if isSub2APITextRequest(channel, path) {
+		return "/responses"
+	}
 	if isKIEChannel(channel, modelName) {
 		if path == "/videos" || path == "/images/generations" || path == "/images/edits" {
 			return "/jobs/createTask"
@@ -530,7 +540,7 @@ func resolveAIProxyPath(channel model.ModelChannel, modelName string, path strin
 		}
 		return path
 	}
-	if isArkSeedanceVideo(channel.BaseURL, modelName) {
+	if isArkSeedanceVideo(channel, modelName) {
 		if path == "/videos" {
 			return "/contents/generations/tasks"
 		}
@@ -541,14 +551,24 @@ func resolveAIProxyPath(channel model.ModelChannel, modelName string, path strin
 	return path
 }
 
-func isArkSeedanceVideo(baseURL string, modelName string) bool {
-	base := strings.ToLower(baseURL)
+func isArkSeedanceVideo(channel model.ModelChannel, modelName string) bool {
+	base := strings.ToLower(channel.BaseURL)
 	model := strings.ToLower(modelName)
-	return strings.Contains(model, "seedance") || strings.Contains(model, "doubao-seedance") || strings.Contains(base, "/api/plan/v3")
+	return strings.EqualFold(strings.TrimSpace(channel.Protocol), "ark") ||
+		strings.Contains(model, "seedance") ||
+		strings.Contains(model, "doubao-seedance") ||
+		strings.Contains(base, "/api/v3") ||
+		strings.Contains(base, "/api/plan/v3")
 }
 
 func isAgnesVideoModel(modelName string) bool {
 	return strings.Contains(strings.ToLower(strings.TrimSpace(modelName)), "agnes-video")
+}
+
+func isAgnesVideoChannel(channel model.ModelChannel, modelName string) bool {
+	protocol := strings.ToLower(strings.TrimSpace(channel.Protocol))
+	baseURL := strings.ToLower(strings.TrimSpace(channel.BaseURL))
+	return protocol == "agnes" || strings.Contains(baseURL, "agnes-ai.com") || isAgnesVideoModel(modelName)
 }
 
 var errMissingModel = &aiError{"缺少模型名称"}

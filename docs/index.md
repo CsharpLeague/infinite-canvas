@@ -5,12 +5,14 @@
 - [快速开始](overview/quick-start.md)
 - [功能介绍](overview/features.md)
 - [Docker 部署](overview/docker.md)
+- [PM2 部署](overview/pm2.md)
 - [第三方 GitHub 提示词仓库](overview/third-party-prompt-repositories.md)
 
 ## 操作手册
 
 - [画布节点操作手册](canvas/canvas-node-manual.md)
 - [画布快捷键](canvas/canvas-shortcuts.md)
+- [模型渠道配置指南](backend/model-channel-guide.md)
 
 ## 开发文档
 

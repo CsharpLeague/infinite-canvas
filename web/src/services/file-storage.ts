@@ -4,7 +4,7 @@ import localforage from "localforage";
 import { nanoid } from "nanoid";
 
 import { apiGet } from "@/services/api/request";
-import { canUseGlobalStorage, loadUserStorageProvider, type StorageConfig, type UserStorageProvider } from "@/services/image-storage";
+import { canUseGlobalStorage, getProxyUrl, loadUserStorageProvider, type StorageConfig, type UserStorageProvider } from "@/services/image-storage";
 import { useUserStore } from "@/stores/use-user-store";
 
 export type UploadedFile = { url: string; storageKey: string; bytes: number; mimeType: string; width?: number; height?: number; durationMs?: number };
@@ -33,7 +33,7 @@ export async function uploadAssetMediaFile(file: File, prefix = "asset-media"): 
 }
 
 export async function downloadRemoteMedia(url: string) {
-    const response = await fetch(proxiedMediaUrl(url));
+    const response = await fetch(getProxyUrl(url));
     if (!response.ok) throw new Error(`视频下载失败：${response.status}`);
     const blob = await response.blob();
     if (blob.type.includes("json") || blob.type.startsWith("text/")) {
@@ -74,12 +74,6 @@ async function uploadMediaBlobToServer(blob: Blob, filename: string): Promise<Up
 async function loadStorageConfig() {
     storageConfigPromise ||= apiGet<StorageConfig>("/api/storage/config");
     return storageConfigPromise;
-}
-
-function proxiedMediaUrl(url: string) {
-    if (!url.startsWith("http://") && !url.startsWith("https://")) return url;
-    if (typeof window !== "undefined" && url.includes(window.location.host)) return url;
-    return `/api/proxy-image?url=${encodeURIComponent(url)}`;
 }
 
 export function clearStorageConfigCache() {
