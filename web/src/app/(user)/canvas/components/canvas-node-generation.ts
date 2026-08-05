@@ -274,9 +274,8 @@ function readReferenceImage(node: CanvasNodeData): ReferenceImage | null {
 
 function readFrameReferences(node: CanvasNodeData | undefined, inputs: NodeGenerationInput[]) {
     const imageByNodeId = new Map(inputs.filter((input) => input.image).map((input) => [input.nodeId, input.image as ReferenceImage]));
-    const videoTailFrame = inputs.find((input) => input.isVideoTailFrame)?.image || null;
     return {
-        firstFrame: node?.metadata?.firstFrameNodeId ? imageByNodeId.get(node.metadata.firstFrameNodeId) || null : videoTailFrame,
+        firstFrame: node?.metadata?.firstFrameNodeId ? imageByNodeId.get(node.metadata.firstFrameNodeId) || null : null,
         lastFrame: node?.metadata?.lastFrameNodeId ? imageByNodeId.get(node.metadata.lastFrameNodeId) || null : null,
     };
 }
