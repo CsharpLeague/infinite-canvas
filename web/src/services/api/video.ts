@@ -43,7 +43,7 @@ function aiApiUrl(config: AiConfig, path: string) {
 }
 
 function aiVideoPollUrl(config: AiConfig, model: string, id: string) {
-    if (!isAgnesVideoModel(model) || !id.startsWith("video_")) {
+    if (!isAgnesVideoConfig(config, model) || !id.startsWith("video_")) {
         return aiApiUrl(config, `/videos/${encodeURIComponent(id)}`);
     }
     if (usesAccountProxy(config)) {
@@ -118,7 +118,7 @@ export async function createVideoGenerationTask(config: AiConfig, prompt: string
         const created = unwrapVideoResponse((await axios.post<ApiVideoResponse>(aiApiUrl(config, "/videos"), body, { headers })).data);
         if (!created.id && !created.video_id) throw new Error("视频接口没有返回任务 ID");
         if (typeof created.progress === "number") onProgress?.(created.progress, created);
-        return { task: created, pollId: videoPollId(model, created), startedAt, requestBody: body };
+        return { task: created, pollId: videoPollId(config, model, created), startedAt, requestBody: body };
     } catch (error) {
         const { message, detail } = readAxiosError(error, "视频生成失败");
         void writeVideoAICallLog(config, model, "/videos", "POST", startedAt, axios.isAxiosError(error) ? error.response?.status || 0 : 0, stringifyLogPayload(summarizeVideoRequestBody(body)), stringifyLogPayload(detail), message);
@@ -132,7 +132,7 @@ function normalizeVideoTaskCreateOptions(options?: string | VideoTaskCreateOptio
 
 export async function pollCreatedVideoGenerationTask(config: AiConfig, task: VideoResponse, { startedAt = Date.now(), requestBody, initialDelayMs = 0, onProgress, onPoll }: { startedAt?: number; requestBody?: unknown; initialDelayMs?: number; onProgress?: VideoProgressHandler; onPoll?: (task: VideoResponse) => void } = {}) {
     const model = config.model || config.videoModel;
-    const pollId = videoPollId(model, task);
+    const pollId = videoPollId(config, model, task);
     if (!pollId) throw new VideoRequestError("视频接口没有返回任务 ID", task);
     let completed: VideoResponse | null = null;
     try {
@@ -163,7 +163,7 @@ export async function pollCreatedVideoGenerationTask(config: AiConfig, task: Vid
 
 export async function pollVideoGenerationTaskStatus(config: AiConfig, task: VideoResponse) {
     const model = config.model || config.videoModel;
-    const pollId = videoPollId(model, task);
+    const pollId = videoPollId(config, model, task);
     if (!pollId) throw new VideoRequestError("视频接口没有返回任务 ID", task);
     return unwrapVideoResponse((await axios.get<ApiVideoResponse>(aiVideoPollUrl(config, model, pollId), { headers: aiHeaders(config), params: usesAccountProxy(config) ? { model } : undefined })).data);
 }
@@ -185,7 +185,7 @@ export async function deleteVideoGenerationTask(config: AiConfig, task?: VideoRe
 
 async function createVideoRequestBody(config: AiConfig, model: string, prompt: string, input: Required<VideoReferenceInput>) {
     const size = normalizeVideoSize(config.size);
-    if (isAgnesVideoModel(model)) {
+    if (isAgnesVideoConfig(config, model)) {
         const references = input.references;
         const inputReferences = await Promise.all(references.slice(0, 7).map(imageToAgnesReference));
         const dimensions = size ? parseVideoDimensions(size) : null;
@@ -468,8 +468,15 @@ function isAgnesVideoModel(model: string) {
     return model.toLowerCase().includes("agnes-video");
 }
 
-function videoPollId(model: string, task: VideoResponse) {
-    return isAgnesVideoModel(model) ? task.video_id || task.id : task.id || task.task_id || task.video_id || "";
+function isAgnesVideoConfig(config: AiConfig, model: string) {
+    const channel = config.channelMode === "remote"
+        ? config.publicChannels.find((item) => item.id === channelIdForActiveModel(config))
+        : localChannelForActiveModel(config);
+    return isAgnesVideoModel(model) || channel?.protocol === "agnes" || (channel?.baseUrl || config.baseUrl).toLowerCase().includes("agnes-ai.com");
+}
+
+function videoPollId(config: AiConfig, model: string, task: VideoResponse) {
+    return isAgnesVideoConfig(config, model) ? task.video_id || task.id : task.id || task.task_id || task.video_id || "";
 }
 
 function normalizeVideoSeconds(value: string) {

@@ -51,6 +51,7 @@ const channelProtocolOptions = [
     { label: "Sub2API", value: "sub2api" },
     { label: "火山方舟", value: "ark" },
     { label: "KIE", value: "kie" },
+    { label: "Agnes", value: "agnes" },
 ];
 const channelProtocolLabels = Object.fromEntries(channelProtocolOptions.map((item) => [item.value, item.label]));
 const emptyStorageProvider: AdminStorageProvider = { id: "", name: "", type: "s3", endpoint: "", region: "auto", bucket: "", accessKeyId: "", secretAccessKey: "", publicBaseUrl: "", pathPrefix: "canvas", weight: 1, enabled: true, ownerUserId: "", capacityBytes: 0, capacityCheckedAt: "", capacityExceeded: false };
@@ -538,14 +539,34 @@ export default function AdminSettingsPage() {
                                             rowKey="model"
                                             pagination={false}
                                             size="small"
-                                            dataSource={publicModels.map((model) => ({ model, credits: modelCostCredits(modelCosts, model) }))}
+                                            dataSource={publicModels.map((model) => modelCostItem(modelCosts, model))}
                                             columns={[
                                                 { title: "模型", dataIndex: "model" },
                                                 {
-                                                    title: "每次调用扣除",
-                                                    dataIndex: "credits",
-                                                    width: 220,
-                                                    render: (_, item) => (
+                                                    title: "计费方式",
+                                                    dataIndex: "billingMode",
+                                                    width: 160,
+                                                    render: (_, item) => <Select className="!w-full" value={item.billingMode} options={[{ label: "固定扣费", value: "fixed" }, { label: "视频按秒", value: "video" }]} onChange={(value) => setModelCost(form, setModelCosts, item.model, { billingMode: value })} />,
+                                                },
+                                                {
+                                                    title: "扣除算力点",
+                                                    width: 520,
+                                                    render: (_, item) => item.billingMode === "video" ? (
+                                                        <Space size={12} wrap>
+                                                            {(["480p", "720p", "1080p"] as const).map((resolution) => (
+                                                                <Space.Compact key={resolution}>
+                                                                    <span className="flex h-8 items-center rounded-l-md border border-r-0 border-stone-200 bg-stone-50 px-3 text-sm text-stone-500 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300">{resolution}</span>
+                                                                    <InputNumber min={0} step={1} precision={0} className="!w-24" value={item.videoRates[resolution]} onChange={(value) => setModelCost(form, setModelCosts, item.model, { videoRates: { ...item.videoRates, [resolution]: Number(value) || 0 } })} />
+                                                                    <span className="flex h-8 items-center rounded-r-md border border-l-0 border-stone-200 bg-stone-50 px-3 text-sm text-stone-500 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300">点/秒</span>
+                                                                </Space.Compact>
+                                                            ))}
+                                                            <Space.Compact>
+                                                                <span className="flex h-8 items-center rounded-l-md border border-r-0 border-stone-200 bg-stone-50 px-3 text-sm text-stone-500 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300">回退</span>
+                                                                <InputNumber min={0} step={1} precision={0} className="!w-24" value={item.credits} onChange={(value) => setModelCost(form, setModelCosts, item.model, Number(value) || 0)} />
+                                                                <span className="flex h-8 items-center rounded-r-md border border-l-0 border-stone-200 bg-stone-50 px-3 text-sm text-stone-500 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300">点</span>
+                                                            </Space.Compact>
+                                                        </Space>
+                                                    ) : (
                                                         <Space.Compact className="!w-full">
                                                             <InputNumber min={0} step={1} precision={0} className="!w-full" value={item.credits} onChange={(value) => setModelCost(form, setModelCosts, item.model, Number(value) || 0)} />
                                                             <span className="flex h-8 items-center rounded-r-md border border-l-0 border-stone-200 bg-stone-50 px-3 text-sm text-stone-500 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300">
@@ -873,7 +894,7 @@ export default function AdminSettingsPage() {
                                 </Form.Item>
                             </Col>
                             <Col span={12}>
-                                <Form.Item name="protocol" label="渠道类型" extra="New API 使用标准 OpenAI 接口；Sub2API 主要使用 Responses；视频推荐选择火山方舟。">
+                                <Form.Item name="protocol" label="渠道类型" extra="New API 使用标准 OpenAI 接口；Sub2API 主要使用 Responses；Agnes Video 使用 Agnes 官方异步视频接口。">
                                     <Select options={channelProtocolOptions} onChange={setEditingChannelProtocol} />
                                 </Form.Item>
                             </Col>
@@ -1104,7 +1125,16 @@ function normalizePublicSetting(setting: Partial<AdminSettings["public"]> = {}):
 }
 
 function normalizeModelCosts(items: Partial<AdminSettings["public"]["modelChannel"]["modelCosts"][number]>[]) {
-    return items.filter((item) => item.model).map((item) => ({ model: item.model || "", credits: Math.max(0, Number(item.credits) || 0) }));
+    return items.filter((item) => item.model).map((item) => ({
+        model: item.model || "",
+        billingMode: item.billingMode === "video" ? "video" as const : "fixed" as const,
+        credits: Math.max(0, Number(item.credits) || 0),
+        videoRates: {
+            "480p": Math.max(0, Number(item.videoRates?.["480p"]) || 0),
+            "720p": Math.max(0, Number(item.videoRates?.["720p"]) || 0),
+            "1080p": Math.max(0, Number(item.videoRates?.["1080p"]) || 0),
+        },
+    }));
 }
 
 function normalizePrivateSetting(setting: Partial<AdminSettings["private"]> = {}): AdminSettings["private"] {
@@ -1175,14 +1205,15 @@ function normalizeChannel(item: Partial<AdminModelChannel> = {}): AdminModelChan
     };
 }
 
-function modelCostCredits(items: AdminSettings["public"]["modelChannel"]["modelCosts"], model: string) {
-    return items.find((item) => item.model === model)?.credits || 0;
+function modelCostItem(items: AdminModelCost[], model: string): AdminModelCost {
+    return items.find((item) => item.model === model) || { model, billingMode: "fixed", credits: 0, videoRates: { "480p": 0, "720p": 0, "1080p": 0 } };
 }
 
-function setModelCost(form: any, setModelCosts: (items: AdminModelCost[]) => void, model: string, credits: number) {
-    const current = (form.getFieldValue(["public", "modelChannel", "modelCosts"]) || []) as AdminSettings["public"]["modelChannel"]["modelCosts"];
+function setModelCost(form: any, setModelCosts: (items: AdminModelCost[]) => void, model: string, patch: Partial<AdminModelCost> | number) {
+    const current = normalizeModelCosts((form.getFieldValue(["public", "modelChannel", "modelCosts"]) || []) as AdminModelCost[]);
+    const item = modelCostItem(current, model);
     const next = current.filter((item) => item.model !== model);
-    next.push({ model, credits: Math.max(0, credits) });
+    next.push(typeof patch === "number" ? { ...item, credits: Math.max(0, patch) } : { ...item, ...patch });
     form.setFieldValue(["public", "modelChannel", "modelCosts"], next);
     setModelCosts(next);
 }

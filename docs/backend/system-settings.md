@@ -19,8 +19,8 @@ description: settings 表中 public 和 private 配置结构说明
   "modelChannel": {
     "availableModels": ["gpt-5.5", "gpt-image-2"],
     "modelCosts": [
-      { "model": "gpt-5.5", "credits": 1 },
-      { "model": "gpt-image-2", "credits": 10 }
+      { "model": "gpt-5.5", "billingMode": "fixed", "credits": 1 },
+      { "model": "seedance-video", "billingMode": "video", "credits": 0, "videoRates": { "480p": 5, "720p": 10, "1080p": 20 } }
     ],
     "defaultModel": "gpt-image-2",
     "defaultImageModel": "gpt-image-2",
@@ -60,7 +60,9 @@ description: settings 表中 public 和 private 配置结构说明
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | `model` | string | 模型名称 |
-| `credits` | number | 每次后端模型接口调用前预扣的算力点 |
+| `billingMode` | string | `fixed` 固定扣费；`video` 按视频分辨率和秒数扣费 |
+| `credits` | number | 固定扣费点数；视频参数无法识别或对应费率为 0 时作为回退值 |
+| `videoRates` | object | 视频每秒费率，包含 `480p`、`720p`、`1080p` |
 
 用户侧请求模式：
 
@@ -108,7 +110,7 @@ description: settings 表中 public 和 private 配置结构说明
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| `protocol` | string | 渠道类型：`openai`、`newapi`、`sub2api`、`ark` 或 `kie` |
+| `protocol` | string | 渠道类型：`openai`、`newapi`、`sub2api`、`ark`、`kie` 或 `agnes` |
 | `name` | string | 渠道名称 |
 | `baseUrl` | string | OpenAI 兼容接口地址 |
 | `apiKey` | string | 渠道密钥 |

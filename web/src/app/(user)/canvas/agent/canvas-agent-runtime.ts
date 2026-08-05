@@ -22,9 +22,17 @@ import {
 
 const MAX_AGENT_STEPS = 12;
 const MAX_PROTOCOL_MESSAGES = 120;
+const MAX_PROTOCOL_CHARACTERS = 32_000;
 
 function trimProtocolMessages(messages: CanvasAgentProtocolMessage[]) {
-    const trimmed = messages.slice(-MAX_PROTOCOL_MESSAGES);
+    const trimmed: CanvasAgentProtocolMessage[] = [];
+    let characters = 0;
+    for (const message of messages.slice(-MAX_PROTOCOL_MESSAGES).reverse()) {
+        const size = JSON.stringify(message).length;
+        if (trimmed.length && characters + size > MAX_PROTOCOL_CHARACTERS) break;
+        trimmed.unshift(message);
+        characters += size;
+    }
     while (trimmed[0]?.role === "tool") trimmed.shift();
     return trimmed;
 }
@@ -64,11 +72,11 @@ export function createCanvasAgentState(): CanvasAgentState {
 }
 
 export async function runCanvasAgent(input: RunCanvasAgentInput): Promise<RunCanvasAgentResult> {
-    let state = input.initialState;
+    let state = { ...createCanvasAgentState(), ...(input.initialState || {}) };
     let allowTools = true;
     let hasExecutedActions = false;
     let protocolMessages: CanvasAgentProtocolMessage[] = trimProtocolMessages([
-        ...input.protocolMessages,
+        ...(Array.isArray(input.protocolMessages) ? input.protocolMessages : []),
         { role: "user" as const, content: buildUserContent(input.userText, input.references, input.config.textModel || input.config.model) },
     ]);
 
@@ -76,14 +84,24 @@ export async function runCanvasAgent(input: RunCanvasAgentInput): Promise<RunCan
         throwIfAborted(input.signal);
         input.onEvent?.({ status: "thinking", label: step ? "正在根据画布结果继续" : "正在理解画布和创作目标" });
         const context = input.getContext(state);
-        const turn = await requestCanvasAgentTurn({
-            config: input.config,
-            systemPrompt: buildCanvasAgentSkillPrompt(state.phase, input.userText, context),
-            messages: protocolMessages,
-            tools: CANVAS_AGENT_TOOLS,
-            allowTools,
-            signal: input.signal,
-        });
+        let turn;
+        try {
+            turn = await requestCanvasAgentTurn({
+                config: input.config,
+                systemPrompt: buildCanvasAgentSkillPrompt(state.phase, input.userText, context),
+                messages: protocolMessages,
+                tools: CANVAS_AGENT_TOOLS,
+                allowTools,
+                signal: input.signal,
+            });
+        } catch (error) {
+            if (hasExecutedActions && /524|响应超时/.test(error instanceof Error ? error.message : String(error))) {
+                const reply = "上游模型在整理结果时响应超时，但本轮已经完成的画布操作均已保存，不需要重新执行。你可以直接继续发送下一步要求。";
+                protocolMessages = trimProtocolMessages([...protocolMessages, { role: "assistant" as const, content: reply }]);
+                return { reply, state, protocolMessages: persistCanvasAgentProtocolMessages(protocolMessages) };
+            }
+            throw error;
+        }
         if (turn.usedJsonFallback) allowTools = false;
 
         const parsedJson = parseCanvasAgentJson(turn.content);

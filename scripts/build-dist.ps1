@@ -62,7 +62,10 @@ New-Item -ItemType Directory -Force -Path (Join-Path $webDist ".next") | Out-Nul
 Copy-Item -LiteralPath (Join-Path $root "web\public") -Destination (Join-Path $webDist "public") -Recurse -Force
 Copy-Item -LiteralPath (Join-Path $root "web\.next\static") -Destination (Join-Path $webDist ".next\static") -Recurse -Force
 Copy-Item -LiteralPath (Join-Path $root "ecosystem.config.cjs") -Destination $dist -Force
-Copy-Item -LiteralPath (Join-Path $root "scripts\start-dist.sh") -Destination (Join-Path $dist "start.sh") -Force
+$startScript = Join-Path $dist "start.sh"
+Copy-Item -LiteralPath (Join-Path $root "scripts\start-dist.sh") -Destination $startScript -Force
+$startScriptContent = [IO.File]::ReadAllText($startScript).Replace("`r`n", "`n")
+[IO.File]::WriteAllText($startScript, $startScriptContent, [Text.UTF8Encoding]::new($false))
 
 $archive = Join-Path $deploymentRoot "infinite-canvas-linux-$Arch.tar.gz"
 Remove-Item -LiteralPath $archive -Force -ErrorAction SilentlyContinue

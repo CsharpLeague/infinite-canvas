@@ -27,8 +27,16 @@ type ModelChannel struct {
 
 // ModelCost 模型算力点配置。
 type ModelCost struct {
-	Model   string `json:"model"`
-	Credits int    `json:"credits"`
+	Model       string         `json:"model"`
+	BillingMode string         `json:"billingMode"`
+	Credits     int            `json:"credits"`
+	VideoRates  VideoModelRate `json:"videoRates"`
+}
+
+type VideoModelRate struct {
+	P480  int `json:"480p"`
+	P720  int `json:"720p"`
+	P1080 int `json:"1080p"`
 }
 
 // PublicModelChannelSetting 公开模型渠道配置。
@@ -56,6 +64,7 @@ type SystemPromptSetting struct {
 
 type PublicModelChannelInfo struct {
 	ID                     string   `json:"id"`
+	Protocol               string   `json:"protocol"`
 	Name                   string   `json:"name"`
 	BaseURL                string   `json:"baseUrl"`
 	Models                 []string `json:"models"`

@@ -163,7 +163,7 @@ export async function deleteAdminAsset(token: string, id: string) {
 
 export type AdminModelChannel = {
     id: string;
-    protocol: "openai" | "newapi" | "sub2api" | "ark" | "kie";
+    protocol: "openai" | "newapi" | "sub2api" | "ark" | "kie" | "agnes";
     name: string;
     baseUrl: string;
     apiKey: string;
@@ -198,11 +198,18 @@ export type AdminPublicModelChannelSettings = {
 
 export type AdminModelCost = {
     model: string;
+    billingMode: "fixed" | "video";
     credits: number;
+    videoRates: {
+        "480p": number;
+        "720p": number;
+        "1080p": number;
+    };
 };
 
 export type AdminPublicModelChannelInfo = {
     id: string;
+    protocol: AdminModelChannel["protocol"];
     name: string;
     baseUrl: string;
     models: string[];

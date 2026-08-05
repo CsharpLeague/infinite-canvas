@@ -80,6 +80,9 @@ func AdminTestChannelModel(index *int, channel model.ModelChannel, modelName str
 	if isKIEAdminChannel(resolved) {
 		return testConfiguredGenerationModel(resolved, modelName, "KIE")
 	}
+	if isAgnesAdminChannel(resolved) && isAgnesVideoModelName(modelName) {
+		return testConfiguredGenerationModel(resolved, modelName, "Agnes")
+	}
 	if isImageModelName(modelName) {
 		return testConfiguredGenerationModel(resolved, modelName, channelDisplayName(resolved))
 	}
@@ -96,6 +99,8 @@ func channelDisplayName(channel model.ModelChannel) string {
 		return "火山方舟"
 	case "kie":
 		return "KIE"
+	case "agnes":
+		return "Agnes"
 	default:
 		return "OpenAI"
 	}
@@ -208,10 +213,15 @@ func normalizePublicSettingWithChannels(setting model.PublicSetting, channels []
 		setting.ModelChannel.SystemPrompts.WorkflowAgent = DefaultSystemPrompts().WorkflowAgent
 	}
 	for i := range setting.ModelChannel.ModelCosts {
-		setting.ModelChannel.ModelCosts[i].Model = strings.TrimSpace(setting.ModelChannel.ModelCosts[i].Model)
-		if setting.ModelChannel.ModelCosts[i].Credits < 0 {
-			setting.ModelChannel.ModelCosts[i].Credits = 0
+		item := &setting.ModelChannel.ModelCosts[i]
+		item.Model = strings.TrimSpace(item.Model)
+		if item.BillingMode != "video" {
+			item.BillingMode = "fixed"
 		}
+		item.Credits = max(item.Credits, 0)
+		item.VideoRates.P480 = max(item.VideoRates.P480, 0)
+		item.VideoRates.P720 = max(item.VideoRates.P720, 0)
+		item.VideoRates.P1080 = max(item.VideoRates.P1080, 0)
 	}
 	if setting.ModelChannel.AllowCustomChannel == nil {
 		enabled := true
@@ -234,17 +244,40 @@ func normalizePublicSettingWithChannels(setting model.PublicSetting, channels []
 }
 
 func ModelCost(modelName string) (int, error) {
+	item, err := modelCostSetting(modelName)
+	return item.Credits, err
+}
+
+func VideoModelCost(modelName string, resolution string, seconds int) (int, error) {
+	item, err := modelCostSetting(modelName)
+	if err != nil || item.BillingMode != "video" {
+		return item.Credits, err
+	}
+	rate := item.VideoRates.P480
+	switch strings.ToLower(strings.TrimSpace(resolution)) {
+	case "720p":
+		rate = item.VideoRates.P720
+	case "1080p":
+		rate = item.VideoRates.P1080
+	}
+	if rate <= 0 || seconds <= 0 {
+		return item.Credits, nil
+	}
+	return rate * seconds, nil
+}
+
+func modelCostSetting(modelName string) (model.ModelCost, error) {
 	settings, err := repository.GetSettings()
 	if err != nil {
-		return 0, err
+		return model.ModelCost{}, err
 	}
 	modelName = strings.TrimSpace(modelName)
 	for _, item := range normalizePublicSetting(settings.Public).ModelChannel.ModelCosts {
 		if item.Model == modelName {
-			return item.Credits, nil
+			return item, nil
 		}
 	}
-	return 0, nil
+	return model.ModelCost{}, nil
 }
 
 func normalizePrivateSetting(setting model.PrivateSetting) model.PrivateSetting {
@@ -573,6 +606,16 @@ func isKIEAdminChannel(channel model.ModelChannel) bool {
 	protocol := strings.ToLower(strings.TrimSpace(channel.Protocol))
 	baseURL := strings.ToLower(strings.TrimSpace(channel.BaseURL))
 	return protocol == "kie" || strings.Contains(baseURL, "kie.ai")
+}
+
+func isAgnesAdminChannel(channel model.ModelChannel) bool {
+	protocol := strings.ToLower(strings.TrimSpace(channel.Protocol))
+	baseURL := strings.ToLower(strings.TrimSpace(channel.BaseURL))
+	return protocol == "agnes" || strings.Contains(baseURL, "agnes-ai.com")
+}
+
+func isAgnesVideoModelName(modelName string) bool {
+	return strings.Contains(strings.ToLower(strings.TrimSpace(modelName)), "agnes-video")
 }
 
 func kieMarketModels() []string {
@@ -918,6 +961,7 @@ func publicChannelInfos(channels []model.ModelChannel) []model.PublicModelChanne
 		}
 		result = append(result, model.PublicModelChannelInfo{
 			ID:                     channel.ID,
+			Protocol:               channel.Protocol,
 			Name:                   channel.Name,
 			BaseURL:                channel.BaseURL,
 			Models:                 append([]string{}, channel.Models...),

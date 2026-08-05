@@ -481,7 +481,7 @@ func readAIRequestCount(body []byte, contentType string) int {
 }
 
 func resolveAIProxyURL(channel model.ModelChannel, modelName string, path string) string {
-	if videoID, ok := agnesVideoQueryID(modelName, path); ok {
+	if videoID, ok := agnesVideoQueryID(channel, modelName, path); ok {
 		baseURL := strings.TrimRight(strings.TrimSpace(channel.BaseURL), "/")
 		if strings.HasSuffix(strings.ToLower(baseURL), "/v1") {
 			baseURL = strings.TrimRight(baseURL[:len(baseURL)-len("/v1")], "/")
@@ -494,8 +494,8 @@ func resolveAIProxyURL(channel model.ModelChannel, modelName string, path string
 	return service.BuildModelChannelURL(channel, path)
 }
 
-func agnesVideoQueryID(modelName string, path string) (string, bool) {
-	if !isAgnesVideoModel(modelName) || !strings.HasPrefix(path, "/videos/") || strings.HasSuffix(path, "/content") {
+func agnesVideoQueryID(channel model.ModelChannel, modelName string, path string) (string, bool) {
+	if !isAgnesVideoChannel(channel, modelName) || !strings.HasPrefix(path, "/videos/") || strings.HasSuffix(path, "/content") {
 		return "", false
 	}
 	id := strings.TrimPrefix(path, "/videos/")
@@ -563,6 +563,12 @@ func isArkSeedanceVideo(channel model.ModelChannel, modelName string) bool {
 
 func isAgnesVideoModel(modelName string) bool {
 	return strings.Contains(strings.ToLower(strings.TrimSpace(modelName)), "agnes-video")
+}
+
+func isAgnesVideoChannel(channel model.ModelChannel, modelName string) bool {
+	protocol := strings.ToLower(strings.TrimSpace(channel.Protocol))
+	baseURL := strings.ToLower(strings.TrimSpace(channel.BaseURL))
+	return protocol == "agnes" || strings.Contains(baseURL, "agnes-ai.com") || isAgnesVideoModel(modelName)
 }
 
 var errMissingModel = &aiError{"缺少模型名称"}

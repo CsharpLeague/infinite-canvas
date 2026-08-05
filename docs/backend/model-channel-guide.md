@@ -69,6 +69,7 @@ https://api.kie.ai/api/v1/jobs/createTask
 - `火山方舟`：用于 Seedance 官方内容生成任务接口。
 - `通用 OpenAI`：用于其他 OpenAI 兼容服务。
 - `KIE`：用于 KIE 原生异步任务接口。
+- `Agnes`：用于 Agnes Video V2.0 官方异步视频接口。
 
 ### OpenAI
 
@@ -115,6 +116,17 @@ gpt-image-2-image-to-image
 
 不要因为模型名称看起来像 KIE 市场模型就选择 KIE；自建中转站如果提供的是 OpenAI 兼容接口，应选择 OpenAI。
 
+### Agnes
+
+Agnes 渠道用于 `agnes-video-v2.0`。建议配置：
+
+```text
+Base URL: https://apihub.agnes-ai.com/v1
+模型名称: agnes-video-v2.0
+```
+
+项目使用 `POST /v1/videos` 创建任务，并优先使用创建结果中的 `video_id` 请求 `GET /agnesapi?video_id=...` 查询状态。任务完成后读取 `metadata.url` 作为视频地址。单张参考图发送 `image`，多张关键帧发送 `extra_body.image` 和 `extra_body.mode=keyframes`。
+
 ## 选择模型
 
 点击“选择模型”后，可以通过两种方式添加：
@@ -123,6 +135,7 @@ gpt-image-2-image-to-image
 
 - OpenAI 协议：后端请求渠道的 `GET /models`，使用返回的模型列表。
 - KIE 协议：当前使用项目内置的 KIE 模型清单，不会向上游查询账号实际权限。
+- Agnes 协议：可拉取模型列表，也可以手动添加 `agnes-video-v2.0`。
 
 因此，列表里出现某个 KIE 模型并不代表当前 API Key 一定有权限调用。
 
