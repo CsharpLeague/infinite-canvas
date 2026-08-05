@@ -7,7 +7,11 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
+	"mime"
+	"mime/multipart"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -74,13 +78,13 @@ func proxyAIVideoTaskRequest(w http.ResponseWriter, r *http.Request) {
 	}
 	credits := 0
 	if userChannelID == "" {
-		credits, err = service.ModelCost(modelName)
+		resolution, seconds := readVideoBillingParameters(body, contentType)
+		credits, err = service.VideoModelCost(modelName, resolution, seconds)
 		if err != nil {
 			log.Printf("AI video read model cost failed: model=%s err=%v", modelName, err)
 			Fail(w, "AI 接口请求失败")
 			return
 		}
-		credits *= readAIRequestCount(body, contentType)
 	}
 	upstreamPath := resolveAIProxyPath(channel, modelName, "/videos")
 	body, contentType, err = normalizeVideoCreateBody(body, contentType, modelName, channel, upstreamPath)
@@ -593,5 +597,92 @@ func findFirstHTTPURL(value any) string {
 func refundVideoCredits(userID string, modelName string, credits int, endpoint string) {
 	if err := service.RefundUserCredits(userID, modelName, credits, endpoint); err != nil {
 		log.Printf("AI video refund credits failed: user=%s model=%s credits=%d err=%v", userID, modelName, credits, err)
+	}
+}
+
+func readVideoBillingParameters(body []byte, contentType string) (string, int) {
+	values := map[string]any{}
+	if strings.HasPrefix(contentType, "multipart/form-data") {
+		_, params, err := mime.ParseMediaType(contentType)
+		if err == nil {
+			form, readErr := multipart.NewReader(bytes.NewReader(body), params["boundary"]).ReadForm(32 << 20)
+			if readErr == nil {
+				defer form.RemoveAll()
+				for key, items := range form.Value {
+					if len(items) > 0 {
+						values[key] = items[0]
+					}
+				}
+			}
+		}
+	} else {
+		_ = json.Unmarshal(body, &values)
+	}
+	resolution := normalizeVideoBillingResolution(firstBillingString(values, "resolution_name", "resolution", "vquality", "quality"), firstBillingString(values, "size"), billingInt(values["width"]), billingInt(values["height"]))
+	seconds := billingInt(firstBillingValue(values, "seconds", "duration", "video_seconds"))
+	if seconds <= 0 {
+		frames := billingInt(values["num_frames"])
+		frameRate := billingInt(values["frame_rate"])
+		if frames > 1 && frameRate > 0 {
+			seconds = int(math.Ceil(float64(frames-1) / float64(frameRate)))
+		}
+	}
+	return resolution, seconds
+}
+
+func normalizeVideoBillingResolution(value string, size string, width int, height int) string {
+	text := strings.ToLower(strings.TrimSpace(value + " " + size))
+	for _, resolution := range []string{"1080p", "720p", "480p"} {
+		if strings.Contains(text, strings.TrimSuffix(resolution, "p")) {
+			return resolution
+		}
+	}
+	if width <= 0 || height <= 0 {
+		_, _ = fmt.Sscanf(strings.ToLower(strings.TrimSpace(size)), "%dx%d", &width, &height)
+	}
+	shortSide := width
+	if shortSide <= 0 || (height > 0 && height < shortSide) {
+		shortSide = height
+	}
+	if shortSide >= 900 {
+		return "1080p"
+	}
+	if shortSide >= 600 {
+		return "720p"
+	}
+	if shortSide > 0 {
+		return "480p"
+	}
+	return ""
+}
+
+func firstBillingString(values map[string]any, keys ...string) string {
+	value := firstBillingValue(values, keys...)
+	if value == nil {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprint(value))
+}
+
+func firstBillingValue(values map[string]any, keys ...string) any {
+	for _, key := range keys {
+		if value, ok := values[key]; ok && strings.TrimSpace(fmt.Sprint(value)) != "" {
+			return value
+		}
+	}
+	return nil
+}
+
+func billingInt(value any) int {
+	switch typed := value.(type) {
+	case float64:
+		return int(math.Ceil(typed))
+	case int:
+		return typed
+	case string:
+		number, _ := strconv.ParseFloat(strings.TrimSpace(strings.TrimSuffix(typed, "s")), 64)
+		return int(math.Ceil(number))
+	default:
+		return 0
 	}
 }

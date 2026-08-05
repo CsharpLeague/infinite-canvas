@@ -324,22 +324,13 @@ func UpdateVideoTaskFromPoll(task model.VideoTask, update VideoTaskPollUpdate) e
 		task.Size = strings.TrimSpace(update.Size)
 	}
 	if videoURL := strings.TrimSpace(update.VideoURL); videoURL != "" && task.StorageKey == "" {
-		object, uploadErr := uploadGeneratedVideo(task.UserID, videoURL)
-		if uploadErr != nil {
-			task.VideoURL = videoURL
-			task.ErrorDetail = "视频自动上传云存储失败: " + uploadErr.Error()
-		} else {
-			task.VideoURL = object.URL
-			task.StorageKey = object.StorageKey
-			task.MimeType = object.MimeType
-			task.Bytes = object.Bytes
-		}
+		task.VideoURL = videoURL
 	}
 	if frameURL := strings.TrimSpace(update.FirstFrameURL); frameURL != "" && task.FirstFrameKey == "" {
-		task.FirstFrameURL, task.FirstFrameKey = persistGeneratedVideoFrame(task.UserID, frameURL, "canvas-video-first-frame.png")
+		task.FirstFrameURL = frameURL
 	}
 	if frameURL := strings.TrimSpace(update.LastFrameURL); frameURL != "" && task.LastFrameKey == "" {
-		task.LastFrameURL, task.LastFrameKey = persistGeneratedVideoFrame(task.UserID, frameURL, "canvas-video-last-frame.png")
+		task.LastFrameURL = frameURL
 	}
 	if strings.TrimSpace(update.Error) != "" {
 		task.Error = strings.TrimSpace(update.Error)
@@ -362,6 +353,28 @@ func UpdateVideoTaskFromPoll(task model.VideoTask, update VideoTaskPollUpdate) e
 		task.Status = "failed"
 		task.CompletedAt = current
 	}
+	if _, err := repository.SaveVideoTask(task); err != nil || task.Status != "completed" {
+		return err
+	}
+
+	if task.VideoURL != "" && task.StorageKey == "" {
+		object, uploadErr := uploadGeneratedVideo(task.UserID, task.VideoURL)
+		if uploadErr != nil {
+			task.ErrorDetail = "视频自动上传云存储失败: " + uploadErr.Error()
+		} else {
+			task.VideoURL = object.URL
+			task.StorageKey = object.StorageKey
+			task.MimeType = object.MimeType
+			task.Bytes = object.Bytes
+		}
+	}
+	if task.FirstFrameURL != "" && task.FirstFrameKey == "" {
+		task.FirstFrameURL, task.FirstFrameKey = persistGeneratedVideoFrame(task.UserID, task.FirstFrameURL, "canvas-video-first-frame.png")
+	}
+	if task.LastFrameURL != "" && task.LastFrameKey == "" {
+		task.LastFrameURL, task.LastFrameKey = persistGeneratedVideoFrame(task.UserID, task.LastFrameURL, "canvas-video-last-frame.png")
+	}
+	task.UpdatedAt = now()
 	_, err := repository.SaveVideoTask(task)
 	return err
 }

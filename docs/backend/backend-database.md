@@ -284,7 +284,9 @@ description: 当前后端主要数据表与字段说明
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | `model` | string | 模型名称 |
-| `credits` | number | 每次后端模型接口调用前预扣的算力点，未配置默认不扣除 |
+| `billingMode` | string | `fixed` 固定扣费；`video` 按视频分辨率和秒数扣费 |
+| `credits` | number | 固定扣费点数；动态视频参数无法识别时的回退点数 |
+| `videoRates` | object | `480p`、`720p`、`1080p` 三档每秒算力点 |
 
 `auth.linuxDo` 当前字段：
 

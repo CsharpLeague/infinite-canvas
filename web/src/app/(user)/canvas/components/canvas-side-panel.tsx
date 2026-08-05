@@ -406,6 +406,7 @@ function LibraryAssetDragCard({ asset, theme, onAssetDragStart, onAssetDragEnd }
 }
 
 function DraggableAssetCard({ theme, title, payload, kind, imageUrl, text, onAssetDragStart, onAssetDragEnd }: { theme: CanvasTheme; title: string; payload: InsertAssetPayload; kind: "text" | "image" | "video" | "audio"; imageUrl: string; text: string; onAssetDragStart: (payload: InsertAssetPayload) => void; onAssetDragEnd: () => void }) {
+    const audio = kind === "audio" && payload.kind === "audio" ? payload : null;
     return (
         <div
             draggable
@@ -419,9 +420,43 @@ function DraggableAssetCard({ theme, title, payload, kind, imageUrl, text, onAss
             className="group relative aspect-square cursor-grab overflow-hidden rounded-xl border transition duration-200 hover:-translate-y-0.5 hover:shadow-lg active:cursor-grabbing"
             style={{ borderColor: theme.node.stroke, background: theme.node.panel }}
         >
-            {kind === "text" ? imageUrl ? <div className="flex size-full flex-col"><img src={imageUrl} alt={title} className="h-1/2 w-full object-cover" /><div className="h-1/2 overflow-hidden whitespace-pre-wrap break-words p-2.5 text-[11px] leading-snug opacity-80">{text}</div></div> : <div className="size-full overflow-hidden whitespace-pre-wrap break-words p-2.5 text-[11px] leading-snug opacity-80">{text}</div> : kind === "audio" ? <span className="grid size-full place-items-center"><Music2 className="size-8 opacity-45" /></span> : imageUrl ? kind === "video" ? <video src={imageUrl + "#t=0.1"} muted playsInline preload="metadata" className="size-full object-cover transition duration-300 group-hover:scale-[1.04]" /> : <img src={imageUrl} alt={title} className="size-full object-cover transition duration-300 group-hover:scale-[1.04]" /> : <span className="grid size-full place-items-center"><FileText className="size-8 opacity-45" /></span>}
+            {kind === "text" ? imageUrl ? <div className="flex size-full flex-col"><img src={imageUrl} alt={title} className="h-1/2 w-full object-cover" /><div className="h-1/2 overflow-hidden whitespace-pre-wrap break-words p-2.5 text-[11px] leading-snug opacity-80">{text}</div></div> : <div className="size-full overflow-hidden whitespace-pre-wrap break-words p-2.5 text-[11px] leading-snug opacity-80">{text}</div> : audio ? <AudioAssetCover title={title} mimeType={audio.mimeType} durationMs={audio.durationMs} theme={theme} /> : imageUrl ? kind === "video" ? <video src={imageUrl + "#t=0.1"} muted playsInline preload="metadata" className="size-full object-cover transition duration-300 group-hover:scale-[1.04]" /> : <img src={imageUrl} alt={title} className="size-full object-cover transition duration-300 group-hover:scale-[1.04]" /> : <span className="grid size-full place-items-center"><FileText className="size-8 opacity-45" /></span>}
         </div>
     );
+}
+
+function AudioAssetCover({ title, mimeType, durationMs, theme }: { title: string; mimeType?: string; durationMs?: number; theme: CanvasTheme }) {
+    const bars = audioWaveform(title);
+    return (
+        <div className="flex size-full flex-col justify-between p-3" style={{ background: `linear-gradient(145deg, ${theme.node.fill}, ${theme.node.panel})`, color: theme.node.text }}>
+            <div className="flex items-center gap-1.5 text-[9px] font-semibold uppercase tracking-[0.14em] opacity-60"><Music2 className="size-3.5" />Audio</div>
+            <div className="flex h-9 items-center gap-[3px]" aria-hidden>
+                {bars.map((height, index) => <span key={index} className="min-w-0 flex-1 rounded-full opacity-70 transition-opacity group-hover:opacity-100" style={{ height, background: theme.node.text }} />)}
+            </div>
+            <div className="min-w-0">
+                <div className="truncate text-[11px] font-medium" title={title}>{title || "未命名音频"}</div>
+                <div className="mt-1 flex items-center justify-between gap-2 text-[9px] opacity-55"><span>{audioFormatLabel(mimeType)}</span><span>{formatAudioDuration(durationMs)}</span></div>
+            </div>
+        </div>
+    );
+}
+
+function audioWaveform(seed: string) {
+    let value = Array.from(seed || "audio").reduce((sum, char) => sum + char.charCodeAt(0), 0);
+    return Array.from({ length: 14 }, () => {
+        value = (value * 9301 + 49297) % 233280;
+        return `${10 + Math.round((value / 233280) * 24)}px`;
+    });
+}
+
+function audioFormatLabel(mimeType?: string) {
+    return (mimeType?.split("/")[1] || "audio").replace("mpeg", "mp3").toUpperCase();
+}
+
+function formatAudioDuration(durationMs?: number) {
+    if (!durationMs || durationMs <= 0) return "--:--";
+    const seconds = Math.floor(durationMs / 1000);
+    return `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
 function assetPayload(asset: Asset): InsertAssetPayload {

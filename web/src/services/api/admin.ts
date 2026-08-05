@@ -198,7 +198,13 @@ export type AdminPublicModelChannelSettings = {
 
 export type AdminModelCost = {
     model: string;
+    billingMode: "fixed" | "video";
     credits: number;
+    videoRates: {
+        "480p": number;
+        "720p": number;
+        "1080p": number;
+    };
 };
 
 export type AdminPublicModelChannelInfo = {

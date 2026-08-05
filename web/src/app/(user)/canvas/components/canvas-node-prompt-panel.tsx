@@ -51,7 +51,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const hasImageContent = isCanvasImageNodeType(node.type) && Boolean(node.metadata?.content);
     const sourcePrompt = isPanorama ? node.metadata?.panoramaSourcePrompt || "" : node.metadata?.prompt || "";
     const [prompt, setPrompt] = useState(sourcePrompt);
-    const credits = requestCreditCost({ channelMode: config.channelMode, modelCosts, model: config.model, count: mode === "image" ? config.count : 1 });
+    const credits = requestCreditCost({ channelMode: config.channelMode, modelCosts, model: config.model, count: mode === "image" ? config.count : 1, mode, resolution: config.vquality, size: config.size, seconds: config.videoSeconds });
     const connectedReferenceNodeIds = new Set(mentionReferences.map((reference) => reference.nodeId));
     const addableReferences = availableReferences.filter((reference) => reference.nodeId !== node.id && !connectedReferenceNodeIds.has(reference.nodeId));
 

@@ -162,7 +162,7 @@ export function CanvasNodeHoverToolbar({
     const nodeToolbarTools: ToolbarTool[] = [
         ...(canSyncVideo ? [{ id: "syncVideo", title: "同步原视频任务结果，不会重新生成", label: "同步结果", icon: <RefreshCw className="size-4" />, onClick: () => onRetry(node) }] : []),
         ...(canRetry && !canSyncVideo ? [{ id: "retry", title: "重新生成", label: "重试", icon: <RefreshCw className="size-4" />, onClick: () => onRetry(node) }] : []),
-        ...(hasImage || hasVideo || isText ? [{ id: "saveAsset", title: "加入我的素材", label: "存素材", icon: <FolderPlus className="size-4" />, onClick: () => onSaveAsset(node) }] : []),
+        ...(hasImage || hasVideo || hasAudio || isText ? [{ id: "saveAsset", title: "加入我的素材", label: "存素材", icon: <FolderPlus className="size-4" />, onClick: () => onSaveAsset(node) }] : []),
         ...(hasImage && node.metadata?.virtualPortraitStatus !== "active" ? [{ id: "virtualPortrait", title: node.metadata?.virtualPortraitError || "上传并提交火山虚拟人像审核", label: node.metadata?.virtualPortraitStatus === "processing" ? "审核中" : node.metadata?.virtualPortraitStatus === "failed" ? "重新入库" : "入库人像", icon: <UserRoundPlus className="size-4" />, onClick: () => onEnrollVirtualPortrait(node) }] : []),
         ...(hasVideo && !node.metadata?.storageKey?.startsWith("server:") ? [{ id: "uploadVideoToCloud", title: "上传至云存储", label: "上传云端", icon: <Upload className="size-4" />, onClick: () => onUploadVideoToCloud(node) }] : []),
         ...(hasImage && !node.metadata?.storagePending && !node.metadata?.storageKey?.startsWith("server:") ? [{ id: "uploadImageToCloud", title: "上传至云存储", label: "上传云端", icon: <Upload className="size-4" />, onClick: () => onUploadImageToCloud(node) }] : []),

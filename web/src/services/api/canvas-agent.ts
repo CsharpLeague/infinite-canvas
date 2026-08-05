@@ -57,6 +57,24 @@ type ResponsesOutputItem = {
     content?: Array<{ type?: string; text?: string }>;
 };
 
+type ChatCompletionChunk = {
+    choices?: Array<{
+        delta?: {
+            content?: string;
+            tool_calls?: Array<{
+                index?: number;
+                id?: string;
+                function?: { name?: string; arguments?: string };
+            }>;
+        };
+    }>;
+    type?: string;
+    delta?: string;
+    item?: ResponsesOutputItem;
+    response?: ChatCompletionPayload;
+    error?: { message?: string };
+};
+
 class CanvasAgentRequestError extends Error {
     status: number;
 
@@ -106,7 +124,7 @@ async function requestCompletion(config: AiConfig, systemPrompt: string, message
     const body: Record<string, unknown> = {
         model: config.model,
         messages: [{ role: "system", content: systemPrompt }, ...messages.map(toRequestMessage)],
-        stream: false,
+        stream: true,
     };
     if (tools.length) {
         body.tools = tools;
@@ -119,7 +137,9 @@ async function requestCompletion(config: AiConfig, systemPrompt: string, message
         body: JSON.stringify(body),
         signal,
     });
-    const payload = (await response.json().catch(() => ({}))) as ChatCompletionPayload;
+    const payload = response.ok && response.headers.get("Content-Type")?.toLowerCase().includes("text/event-stream")
+        ? await readCompletionStream(response)
+        : (await response.json().catch(() => ({}))) as ChatCompletionPayload;
     if (!response.ok || (typeof payload.code === "number" && payload.code !== 0)) {
         throw new CanvasAgentRequestError(readError(payload, response.status), response.status);
     }
@@ -203,7 +223,71 @@ function parseToolArguments(value: string | Record<string, unknown> | undefined)
 }
 
 function readError(payload: ChatCompletionPayload, status: number) {
-    return payload.error?.message || payload.msg || (status ? "文本模型请求失败：" + status : "文本模型请求失败");
+    const message = payload.error?.message || payload.msg || "";
+    if (status === 524 || /(?:error code|status)\s*:?\s*524|\b524\b/i.test(message)) {
+        return "上游模型响应超时（524），已完成的画布操作不会丢失，可以继续发送消息。";
+    }
+    return message || (status ? "文本模型请求失败：" + status : "文本模型请求失败");
+}
+
+async function readCompletionStream(response: Response): Promise<ChatCompletionPayload> {
+    if (!response.body) throw new CanvasAgentRequestError("文本模型没有返回可读取的流式响应", response.status);
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    const toolCalls = new Map<number, { id?: string; name?: string; arguments: string }>();
+    let buffer = "";
+    let content = "";
+    let completed: ChatCompletionPayload | undefined;
+
+    const consume = (block: string) => {
+        const data = block.split(/\r?\n/).filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trimStart()).join("\n").trim();
+        if (!data || data === "[DONE]") return;
+        const event = JSON.parse(data) as ChatCompletionChunk;
+        if (event.error?.message) throw new CanvasAgentRequestError(event.error.message, response.status);
+        if (event.type === "response.completed" && event.response) completed = event.response;
+        if (event.type === "response.output_text.delta" && event.delta) content += event.delta;
+        if (event.type === "response.output_item.done" && event.item?.type === "function_call" && event.item.name) {
+            toolCalls.set(toolCalls.size, {
+                id: event.item.call_id || event.item.id,
+                name: event.item.name,
+                arguments: typeof event.item.arguments === "string" ? event.item.arguments : JSON.stringify(event.item.arguments || {}),
+            });
+        }
+        for (const choice of event.choices || []) {
+            if (choice.delta?.content) content += choice.delta.content;
+            for (const call of choice.delta?.tool_calls || []) {
+                const index = call.index || 0;
+                const current = toolCalls.get(index) || { arguments: "" };
+                if (call.id) current.id = call.id;
+                if (call.function?.name) current.name = call.function.name;
+                if (call.function?.arguments) current.arguments += call.function.arguments;
+                toolCalls.set(index, current);
+            }
+        }
+    };
+
+    while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let separator = buffer.match(/\r?\n\r?\n/);
+        while (separator?.index !== undefined) {
+            consume(buffer.slice(0, separator.index));
+            buffer = buffer.slice(separator.index + separator[0].length);
+            separator = buffer.match(/\r?\n\r?\n/);
+        }
+    }
+    buffer += decoder.decode();
+    if (buffer.trim()) consume(buffer);
+    if (completed) return completed;
+    return {
+        choices: [{
+            message: {
+                content,
+                tool_calls: [...toolCalls.values()].filter((call) => call.name).map((call) => ({ id: call.id, function: { name: call.name, arguments: call.arguments } })),
+            },
+        }],
+    };
 }
 
 function hasImageContent(messages: CanvasAgentProtocolMessage[]) {

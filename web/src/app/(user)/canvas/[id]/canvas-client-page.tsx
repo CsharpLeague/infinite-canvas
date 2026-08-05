@@ -56,6 +56,7 @@ import { CANVAS_ASSET_DRAG_TYPE, CanvasSidePanel } from "../components/canvas-si
 import { DEFAULT_CANVAS_AGENT_PANEL, DEFAULT_CANVAS_SIDE_PANEL, useCanvasStore } from "../stores/use-canvas-store";
 import { buildCanvasResourceReferences, buildNodeMentionReferences } from "../utils/canvas-resource-references";
 import { buildCanvasAgentContext } from "../agent/canvas-agent-context";
+import { createCanvasAgentState } from "../agent/canvas-agent-runtime";
 import type { CanvasAgentAction, CanvasAgentToolResult } from "../agent/canvas-agent-tools";
 import {
     CanvasNodeType,
@@ -1938,6 +1939,12 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                 const content = node.metadata?.content?.trim();
                 if (!content) return message.error("没有可保存的文本");
                 addAsset({ kind: "text", title: node.metadata?.prompt?.slice(0, 24) || "画布文本", coverUrl: "", tags: [], source: "Canvas", data: { content }, metadata: { source: "canvas", nodeId: node.id } });
+                message.success("已加入我的素材");
+                return;
+            }
+            if (node.type === CanvasNodeType.Audio) {
+                if (!node.metadata?.content) return message.error("没有可保存的音频");
+                addAsset({ kind: "audio", title: node.metadata?.prompt?.slice(0, 24) || "画布音频", coverUrl: "", tags: [], source: "Canvas", data: { url: node.metadata.content, storageKey: node.metadata.storageKey, bytes: node.metadata.bytes, mimeType: node.metadata.mimeType || "audio/mpeg", durationMs: node.metadata.durationMs }, metadata: { source: "canvas", nodeId: node.id, prompt: node.metadata?.prompt } });
                 message.success("已加入我的素材");
                 return;
             }
@@ -4562,8 +4569,10 @@ async function hydrateAssistantImages(sessions: CanvasAssistantSession[]) {
     return Promise.all(
         sessions.map(async (session) => ({
             ...session,
+            agentState: { ...createCanvasAgentState(), ...(session.agentState || {}) },
+            protocolMessages: Array.isArray(session.protocolMessages) ? session.protocolMessages : [],
             messages: await Promise.all(
-                session.messages.map(async (message) => {
+                (session.messages || []).map(async (message) => {
                     const interrupted = message.status === "thinking" || message.status === "running";
                     return {
                         ...message,
