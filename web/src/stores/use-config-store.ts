@@ -10,6 +10,7 @@ import { useUserStore } from "@/stores/use-user-store";
 
 export type LocalModelChannel = {
     id: string;
+    protocol?: "openai" | "newapi" | "sub2api" | "ark" | "kie" | "agnes";
     name: string;
     baseUrl: string;
     apiKey: string;
@@ -69,7 +70,7 @@ export type AiConfig = {
         workflowAgent: string;
     };
     localChannels: LocalModelChannel[];
-    publicChannels: Array<{ id?: string; name?: string; baseUrl?: string; models?: string[]; weight?: number; timeout?: number; enabled?: boolean; remark?: string; virtualPortraitEnabled?: boolean }>;
+    publicChannels: Array<{ id?: string; protocol?: "openai" | "newapi" | "sub2api" | "ark" | "kie" | "agnes"; name?: string; baseUrl?: string; models?: string[]; weight?: number; timeout?: number; enabled?: boolean; remark?: string; virtualPortraitEnabled?: boolean }>;
     syncModelConfig: boolean;
     syncStorageConfig: boolean;
     activeChannelId: string;
@@ -442,10 +443,11 @@ function normalizeArkPlanBaseUrl(baseUrl: string) {
     }
 }
 
-export function normalizeLocalChannels(config: Partial<AiConfig>) {
+export function normalizeLocalChannels(config: Partial<AiConfig>): LocalModelChannel[] {
     const channels = Array.isArray(config.localChannels) ? config.localChannels : [];
     const normalized = channels.map((channel, index) => ({
         id: channel.id || `local-${index + 1}`,
+        protocol: channel.protocol,
         name: typeof channel.name === "string" ? channel.name : `本地渠道 ${index + 1}`,
         baseUrl: channel.baseUrl || "",
         apiKey: channel.apiKey || "",

@@ -5,6 +5,12 @@ description: 当前版本已实现但仍需人工验证的变更项
 
 # 待测试
 
+## Agnes Video V2.0 渠道
+
+- 管理后台渠道类型新增 Agnes；推荐使用 `https://apihub.agnes-ai.com/v1` 和模型 `agnes-video-v2.0`。
+- 视频创建使用 `/v1/videos`，轮询优先使用创建响应中的 `video_id` 请求 `/agnesapi`，并从 `metadata.url` 读取最终视频。
+- Agnes 协议支持单图参考和多关键帧参考；公开渠道与登录用户同步的本地渠道会保留协议字段，避免仅依赖模型名判断。
+
 ## 画布节点参考
 
 - 节点生成面板会以缩略图展示当前连接的图片、视频、音频和文本参考，并标记首帧、尾帧或实际引用编号。
@@ -51,6 +57,7 @@ description: 当前版本已实现但仍需人工验证的变更项
 - 本地图片文件可转换为 Base64 Data URL；参考视频和音频需先上传云存储并提供可公开访问的 URL。
 
 ## 文本模型与画布助手
+- 创作 Agent 同时解析 Chat Completions 与 Responses 的文本、`output_text` 和 `function_call` 返回，Sub2API 返回 HTTP 200 时不再因缺少 `choices[0].message` 被误判为请求失败。
 
 - New API 和通用 OpenAI 渠道继续使用 `/chat/completions`；Sub2API 文本渠道会由后端自动转换到 `/responses`。
 - Sub2API 转换支持系统提示词、连续对话以及画布图片引用，助手可同时解析 Chat Completions 和 Responses 的流式文本事件。

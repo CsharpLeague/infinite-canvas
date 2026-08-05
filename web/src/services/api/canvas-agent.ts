@@ -32,6 +32,8 @@ type ChatCompletionPayload = {
         };
     }>;
     data?: {
+        output_text?: string;
+        output?: ResponsesOutputItem[];
         choices?: Array<{
             message?: {
                 content?: string | null;
@@ -42,6 +44,17 @@ type ChatCompletionPayload = {
             };
         }>;
     };
+    output_text?: string;
+    output?: ResponsesOutputItem[];
+};
+
+type ResponsesOutputItem = {
+    type?: string;
+    id?: string;
+    call_id?: string;
+    name?: string;
+    arguments?: string | Record<string, unknown>;
+    content?: Array<{ type?: string; text?: string }>;
 };
 
 class CanvasAgentRequestError extends Error {
@@ -110,7 +123,7 @@ async function requestCompletion(config: AiConfig, systemPrompt: string, message
     if (!response.ok || (typeof payload.code === "number" && payload.code !== 0)) {
         throw new CanvasAgentRequestError(readError(payload, response.status), response.status);
     }
-    const message = payload.choices?.[0]?.message || payload.data?.choices?.[0]?.message;
+    const message = readResponseMessage(payload);
     if (!message) throw new CanvasAgentRequestError(readError(payload, response.status) || "文本模型没有返回内容", response.status);
 
     refreshRemoteUser(config);
@@ -128,6 +141,27 @@ async function requestCompletion(config: AiConfig, systemPrompt: string, message
             ];
         }),
     };
+}
+
+function readResponseMessage(payload: ChatCompletionPayload) {
+    const chatMessage = payload.choices?.[0]?.message || payload.data?.choices?.[0]?.message;
+    if (chatMessage) return chatMessage;
+
+    const output = payload.output || payload.data?.output || [];
+    const content = payload.output_text || payload.data?.output_text || output
+        .flatMap((item) => item.content || [])
+        .filter((item) => item.type === "output_text" || item.type === "text")
+        .map((item) => item.text || "")
+        .join("");
+    const toolCalls = output.flatMap((item) => {
+        if (item.type !== "function_call" || !item.name) return [];
+        return [{
+            id: item.call_id || item.id,
+            function: { name: item.name, arguments: item.arguments },
+        }];
+    });
+    if (!content && !toolCalls.length) return undefined;
+    return { content, tool_calls: toolCalls };
 }
 
 function toRequestMessage(message: CanvasAgentProtocolMessage) {

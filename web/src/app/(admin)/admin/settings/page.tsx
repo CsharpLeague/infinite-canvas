@@ -51,6 +51,7 @@ const channelProtocolOptions = [
     { label: "Sub2API", value: "sub2api" },
     { label: "火山方舟", value: "ark" },
     { label: "KIE", value: "kie" },
+    { label: "Agnes", value: "agnes" },
 ];
 const channelProtocolLabels = Object.fromEntries(channelProtocolOptions.map((item) => [item.value, item.label]));
 const emptyStorageProvider: AdminStorageProvider = { id: "", name: "", type: "s3", endpoint: "", region: "auto", bucket: "", accessKeyId: "", secretAccessKey: "", publicBaseUrl: "", pathPrefix: "canvas", weight: 1, enabled: true, ownerUserId: "", capacityBytes: 0, capacityCheckedAt: "", capacityExceeded: false };
@@ -873,7 +874,7 @@ export default function AdminSettingsPage() {
                                 </Form.Item>
                             </Col>
                             <Col span={12}>
-                                <Form.Item name="protocol" label="渠道类型" extra="New API 使用标准 OpenAI 接口；Sub2API 主要使用 Responses；视频推荐选择火山方舟。">
+                                <Form.Item name="protocol" label="渠道类型" extra="New API 使用标准 OpenAI 接口；Sub2API 主要使用 Responses；Agnes Video 使用 Agnes 官方异步视频接口。">
                                     <Select options={channelProtocolOptions} onChange={setEditingChannelProtocol} />
                                 </Form.Item>
                             </Col>

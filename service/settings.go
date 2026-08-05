@@ -80,6 +80,9 @@ func AdminTestChannelModel(index *int, channel model.ModelChannel, modelName str
 	if isKIEAdminChannel(resolved) {
 		return testConfiguredGenerationModel(resolved, modelName, "KIE")
 	}
+	if isAgnesAdminChannel(resolved) && isAgnesVideoModelName(modelName) {
+		return testConfiguredGenerationModel(resolved, modelName, "Agnes")
+	}
 	if isImageModelName(modelName) {
 		return testConfiguredGenerationModel(resolved, modelName, channelDisplayName(resolved))
 	}
@@ -96,6 +99,8 @@ func channelDisplayName(channel model.ModelChannel) string {
 		return "火山方舟"
 	case "kie":
 		return "KIE"
+	case "agnes":
+		return "Agnes"
 	default:
 		return "OpenAI"
 	}
@@ -575,6 +580,16 @@ func isKIEAdminChannel(channel model.ModelChannel) bool {
 	return protocol == "kie" || strings.Contains(baseURL, "kie.ai")
 }
 
+func isAgnesAdminChannel(channel model.ModelChannel) bool {
+	protocol := strings.ToLower(strings.TrimSpace(channel.Protocol))
+	baseURL := strings.ToLower(strings.TrimSpace(channel.BaseURL))
+	return protocol == "agnes" || strings.Contains(baseURL, "agnes-ai.com")
+}
+
+func isAgnesVideoModelName(modelName string) bool {
+	return strings.Contains(strings.ToLower(strings.TrimSpace(modelName)), "agnes-video")
+}
+
 func kieMarketModels() []string {
 	return []string{
 		"bytedance/seedream",
@@ -918,6 +933,7 @@ func publicChannelInfos(channels []model.ModelChannel) []model.PublicModelChanne
 		}
 		result = append(result, model.PublicModelChannelInfo{
 			ID:                     channel.ID,
+			Protocol:               channel.Protocol,
 			Name:                   channel.Name,
 			BaseURL:                channel.BaseURL,
 			Models:                 append([]string{}, channel.Models...),

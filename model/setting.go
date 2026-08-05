@@ -56,6 +56,7 @@ type SystemPromptSetting struct {
 
 type PublicModelChannelInfo struct {
 	ID                     string   `json:"id"`
+	Protocol               string   `json:"protocol"`
 	Name                   string   `json:"name"`
 	BaseURL                string   `json:"baseUrl"`
 	Models                 []string `json:"models"`
