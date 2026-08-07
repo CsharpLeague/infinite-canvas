@@ -348,6 +348,9 @@ func pollVideoTaskFromUpstream(task model.VideoTask) (service.VideoTaskPollUpdat
 }
 
 func normalizeVideoCreateBody(body []byte, contentType string, modelName string, channel model.ModelChannel, upstreamPath string) ([]byte, string, error) {
+	if isMiniMaxVideoChannel(channel, modelName) && upstreamPath == "/v2/video_generation" {
+		return normalizeMiniMaxVideoBody(body, contentType, modelName)
+	}
 	if isArkSeedanceVideo(channel, modelName) && upstreamPath == "/contents/generations/tasks" {
 		return normalizeArkSeedanceVideoBody(body, contentType, modelName)
 	}
@@ -371,6 +374,11 @@ func doAIRequest(request *http.Request, channel model.ModelChannel) ([]byte, int
 }
 
 func transformVideoCreatePayload(payload []byte, request *http.Request, channel model.ModelChannel, modelName string) []byte {
+	if isMiniMaxVideoChannel(channel, modelName) && strings.Contains(request.URL.Path, "/v2/video_generation") {
+		if transformed, ok := transformMiniMaxCreateVideoResponse(payload, modelName); ok {
+			return transformed
+		}
+	}
 	if isKIEChannel(channel, modelName) && strings.Contains(request.URL.Path, "/jobs/createTask") {
 		if transformed, ok := transformKIECreateVideoResponse(payload, modelName); ok {
 			return transformed
@@ -385,6 +393,11 @@ func transformVideoCreatePayload(payload []byte, request *http.Request, channel 
 }
 
 func transformVideoStatusPayload(payload []byte, request *http.Request, channel model.ModelChannel, modelName string) []byte {
+	if isMiniMaxVideoChannel(channel, modelName) && strings.Contains(request.URL.Path, "/v2/query/video_generation/") {
+		if transformed, ok := transformMiniMaxVideoTaskResponse(payload); ok {
+			return transformed
+		}
+	}
 	if isKIEChannel(channel, modelName) && strings.Contains(request.URL.Path, "/jobs/recordInfo") {
 		if transformed, ok := transformKIETaskResponse(payload, modelName); ok {
 			return transformed
@@ -631,11 +644,18 @@ func readVideoBillingParameters(body []byte, contentType string) (string, int) {
 }
 
 func normalizeVideoBillingResolution(value string, size string, width int, height int) string {
-	text := strings.ToLower(strings.TrimSpace(value + " " + size))
-	for _, resolution := range []string{"1080p", "720p", "480p"} {
-		if strings.Contains(text, strings.TrimSuffix(resolution, "p")) {
-			return resolution
+	selected := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(value), " ", ""))
+	switch selected {
+	case "low":
+		return "480p"
+	case "auto", "high", "medium":
+		return "720p"
+	}
+	if selected != "" {
+		if _, err := strconv.Atoi(selected); err == nil {
+			return selected + "p"
 		}
+		return selected
 	}
 	if width <= 0 || height <= 0 {
 		_, _ = fmt.Sscanf(strings.ToLower(strings.TrimSpace(size)), "%dx%d", &width, &height)

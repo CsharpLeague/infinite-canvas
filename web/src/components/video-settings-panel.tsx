@@ -24,6 +24,8 @@ const sizeOptions = [
 ];
 
 const secondOptions = [6, 10, 12, 16, 20];
+const miniMaxRatioOptions = ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"] as const;
+const miniMaxDurationOptions = Array.from({ length: 12 }, (_, index) => index + 4);
 const klingV26ModeOptions = [
     { value: "std", title: "标准模式", desc: "(720P 无声)" },
     { value: "pro", title: "专业模式", desc: "(1080P 音频)" },
@@ -54,6 +56,9 @@ type VideoSettingsPanelProps = {
 };
 
 export function VideoSettingsPanel({ config, modelName, onConfigChange, theme, showTitle = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5", hideNegativePrompt = false, visualOnly = false }: VideoSettingsPanelProps) {
+    if (isMiniMaxOfficialConfig(config, modelName || config.model || config.videoModel)) {
+        return <MiniMaxVideoSettingsPanel config={config} modelName={modelName} onConfigChange={onConfigChange} theme={theme} showTitle={showTitle} className={className} visualOnly={visualOnly} />;
+    }
     if (isAPIMartKlingV26Config(config, modelName || config.model || config.videoModel) || isAPIMartKlingV3Config(config, modelName || config.model || config.videoModel) || isKIEKlingV3Config(config, modelName || config.model || config.videoModel)) {
         return <KlingV26VideoSettingsPanel config={config} modelName={modelName} onConfigChange={onConfigChange} theme={theme} showTitle={showTitle} className={className} hideNegativePrompt={hideNegativePrompt} visualOnly={visualOnly} />;
     }
@@ -62,6 +67,8 @@ export function VideoSettingsPanel({ config, modelName, onConfigChange, theme, s
     }
 
     const model = modelName || config.model || config.videoModel;
+    const modelNameKey = modelKey(model);
+    const grokVideo = modelNameKey.includes("grok-imagine");
     const grokMode = config.videoMode === "fun" || config.videoMode === "spicy" ? config.videoMode : "normal";
     const seconds = config.videoSeconds || "6";
     const size = normalizeVideoSizeValue(config.size);
@@ -130,17 +137,53 @@ export function VideoSettingsPanel({ config, modelName, onConfigChange, theme, s
                     <>
                         <SettingGroup title="秒数" color={theme.node.muted}>
                             <div className="grid grid-cols-3 gap-2.5">
-                        {secondOptions.map((value) => (
+                        {(grokVideo ? [5, 10, 15] : secondOptions).map((value) => (
                             <OptionPill key={value} selected={seconds === String(value)} theme={theme} onClick={() => onConfigChange("videoSeconds", String(value))}>
                                 {value}s
                             </OptionPill>
                         ))}
-                        <NumberInput value={seconds} min={1} max={30} theme={theme} onChange={(value) => onConfigChange("videoSeconds", value)} />
+                        {grokVideo ? null : <NumberInput value={seconds} min={1} max={30} theme={theme} onChange={(value) => onConfigChange("videoSeconds", value)} />}
                             </div>
                         </SettingGroup>
                         {audioGenerationEnabled ? <AudioGenerationSetting checked={generateAudio} theme={theme} onChange={(checked) => onConfigChange("videoGenerateAudio", String(checked))} /> : null}
                     </>
                 ) : null}
+            </div>
+        </ImageSettingsTheme>
+    );
+}
+
+function MiniMaxVideoSettingsPanel({ config, onConfigChange, theme, showTitle, className, visualOnly }: VideoSettingsPanelProps) {
+    const resolution = String(config.vquality).toLowerCase() === "2k" ? "2K" : "768P";
+    const ratio = miniMaxRatioOptions.includes(config.size as typeof miniMaxRatioOptions[number]) ? config.size : "16:9";
+    const duration = Math.max(4, Math.min(15, Math.floor(Number(config.videoSeconds) || 5)));
+    const watermark = boolConfig(config.videoWatermark, false);
+    return (
+        <ImageSettingsTheme theme={theme}>
+            <div className={className} style={{ color: theme.node.text }} onMouseDown={(event) => event.stopPropagation()}>
+                {showTitle ? <div className="text-lg font-semibold">视频设置</div> : null}
+                <SettingGroup title="分辨率" color={theme.node.muted}>
+                    <div className="grid grid-cols-2 gap-2.5">
+                        {["768P", "2K"].map((value) => <OptionPill key={value} selected={resolution === value} theme={theme} onClick={() => onConfigChange("vquality", value)}>{value}</OptionPill>)}
+                    </div>
+                </SettingGroup>
+                <SettingGroup title="画面比例" color={theme.node.muted}>
+                    <div className="grid grid-cols-3 gap-2.5">
+                        {miniMaxRatioOptions.map((value) => <OptionPill key={value} selected={ratio === value} theme={theme} onClick={() => onConfigChange("size", value)}>{value}</OptionPill>)}
+                    </div>
+                </SettingGroup>
+                {!visualOnly ? <>
+                    <SettingGroup title="时长" color={theme.node.muted}>
+                        <div className="grid grid-cols-4 gap-2.5">
+                            {miniMaxDurationOptions.map((value) => <OptionPill key={value} selected={duration === value} theme={theme} onClick={() => onConfigChange("videoSeconds", String(value))}>{value}s</OptionPill>)}
+                        </div>
+                    </SettingGroup>
+                    <SettingGroup title="输出" color={theme.node.muted}>
+                        <div className="grid gap-2 rounded-xl border p-2.5" style={{ borderColor: theme.node.stroke }}>
+                            <SwitchRow label="添加 AIGC 水印" checked={watermark} theme={theme} onChange={(checked) => onConfigChange("videoWatermark", String(checked))} />
+                        </div>
+                    </SettingGroup>
+                </> : null}
             </div>
         </ImageSettingsTheme>
     );
@@ -295,7 +338,14 @@ function SeedanceVideoSettingsPanel({ config, modelName, onConfigChange, theme, 
 }
 
 export function videoResolutionLabel(value: string) {
+    if (/^\d+k$/i.test(String(value).trim())) return String(value).trim().toUpperCase();
     return `${normalizeVideoResolutionValue(value)}p`;
+}
+
+export function defaultVideoResolutionForModel(config: AiConfig, modelName = config.videoModel || config.model) {
+    if (isMiniMaxOfficialConfig(config, modelName)) return "768P";
+    if (modelKey(modelName).includes("kling")) return "720p";
+    return "480p";
 }
 
 export function videoSizeLabel(value: string) {
@@ -444,6 +494,17 @@ function isProviderKlingConfig(config: AiConfig, modelName: string, key: string,
     const record = channel as { id?: string; name?: string; baseUrl?: string; remark?: string } | undefined;
     const text = [record?.id, record?.name, record?.baseUrl, record?.remark].filter(Boolean).join(" ").toLowerCase();
     return text.includes(provider);
+}
+
+function isMiniMaxOfficialConfig(config: AiConfig, modelName: string) {
+    const model = modelName || config.model || config.videoModel;
+    if (modelKey(model) !== "minimax-h3") return false;
+    const scopedConfig = { ...config, model, videoModel: model };
+    const channelId = channelIdForActiveModel(scopedConfig);
+    const channels = config.channelMode === "remote" ? config.publicChannels : [localChannelForActiveModel(scopedConfig)];
+    const channel = channels.find((item) => (item?.id || "") === channelId) || channels[0];
+    const record = channel as { protocol?: string; name?: string; baseUrl?: string } | undefined;
+    return record?.protocol === "minimax" || (record?.baseUrl || "").toLowerCase().includes("api.minimaxi.com");
 }
 
 function normalizeKlingV26Ratio(value: string) {

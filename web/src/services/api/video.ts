@@ -85,7 +85,7 @@ export async function requestVideoGeneration(config: AiConfig, prompt: string, r
     const input = legacyVideoReferences ? { references: Array.isArray(references) ? references : references.references || [], videoReferences: legacyVideoReferences, audioReferences } : references;
     const normalizedInput = normalizeVideoReferenceInput(input);
     const activeChannelId = channelIdForActiveModel(config);
-    const mismatchedPortrait = normalizedInput.references.find((image) => image.arkAssetId && image.arkChannelId && image.arkChannelId !== activeChannelId);
+    const mismatchedPortrait = isSeedanceVideoConfig(config) && normalizedInput.references.find((image) => image.arkAssetId && image.arkChannelId && image.arkChannelId !== activeChannelId);
     if (mismatchedPortrait) throw new VideoRequestError("虚拟人像所属火山渠道与当前视频渠道不一致，请切换到入库时使用的火山渠道");
     const created = await createVideoGenerationTask(config, prompt, input, onProgress ? (progress) => onProgress(progress) : undefined);
     return pollCreatedVideoGenerationTask(config, created.task, { startedAt: created.startedAt, requestBody: created.requestBody, onProgress: onProgress ? (progress) => onProgress(progress) : undefined });
@@ -95,7 +95,7 @@ export async function createVideoGenerationTask(config: AiConfig, prompt: string
     const model = config.model || config.videoModel;
     const normalizedReferences = normalizeVideoReferenceInput(references);
     const activeChannelId = channelIdForActiveModel(config);
-    if (normalizedReferences.references.some((image) => image.arkAssetId && image.arkChannelId && image.arkChannelId !== activeChannelId)) {
+    if (isSeedanceVideoConfig(config) && normalizedReferences.references.some((image) => image.arkAssetId && image.arkChannelId && image.arkChannelId !== activeChannelId)) {
         throw new VideoRequestError("虚拟人像所属火山渠道与当前视频渠道不一致，请切换到入库时使用的火山渠道");
     }
     if (
@@ -184,7 +184,8 @@ export async function deleteVideoGenerationTask(config: AiConfig, task?: VideoRe
 }
 
 async function createVideoRequestBody(config: AiConfig, model: string, prompt: string, input: Required<VideoReferenceInput>) {
-    const size = normalizeVideoSize(config.size);
+    const miniMaxH3 = isMiniMaxOfficialVideoConfig(config, model);
+    const size = miniMaxH3 ? config.size || "16:9" : normalizeVideoSize(config.size);
     if (isAgnesVideoConfig(config, model)) {
         const references = input.references;
         const inputReferences = await Promise.all(references.slice(0, 7).map(imageToAgnesReference));
@@ -241,16 +242,19 @@ async function createVideoRequestBody(config: AiConfig, model: string, prompt: s
         if (!kieMotionControl && !isGeminiOmniFlashVideoModel(model)) body.append("seconds", normalizeVideoSecondsForModel(model, config.videoSeconds));
         if (isSeedanceVideoConfig(config)) body.append("size", normalizeSeedanceRatio(config.size));
         else if (size) body.append("size", size);
-        body.append("resolution_name", normalizeVideoResolution(config.vquality));
+        body.append("resolution_name", miniMaxH3 ? (String(config.vquality).toLowerCase() === "2k" ? "2K" : "768P") : normalizeVideoResolution(config.vquality));
         if (isKIEGrokVideoModel(config, model)) body.append("mode", normalizeGrokVideoMode(config.videoMode));
         else body.append("preset", "normal");
     }
     if (motionControl) body.append("character_orientation", normalizeCharacterOrientation(config.videoCharacterOrientation));
     if (supportsVideoAudioGeneration(model)) body.append("video_generate_audio", String(boolConfig(config.videoGenerateAudio, true)));
-    const files = await Promise.all(input.references.slice(0, kling ? 2 : 9).map(imageReferenceToFormValue));
+    if (miniMaxH3) body.append("aigc_watermark", String(boolConfig(config.videoWatermark, false)));
+    const useArkAssetId = isSeedanceVideoConfig(config);
+    const referenceLimit = modelKey(model) === "grok-imagine-video-1-5-preview" ? 1 : kling ? 2 : 9;
+    const files = await Promise.all(input.references.slice(0, referenceLimit).map((image) => imageReferenceToFormValue(image, useArkAssetId)));
     files.forEach((file) => body.append("input_reference[]", file));
-    if (!kling && input.firstFrame) body.append("first_frame_url", await imageReferenceToFormValue(input.firstFrame));
-    if (!kling && input.lastFrame) body.append("last_frame_url", await imageReferenceToFormValue(input.lastFrame));
+    if (!kling && input.firstFrame) body.append("first_frame_url", await imageReferenceToFormValue(input.firstFrame, useArkAssetId));
+    if (!kling && input.lastFrame) body.append("last_frame_url", await imageReferenceToFormValue(input.lastFrame, useArkAssetId));
     const videoFiles = kling ? [] : await Promise.all(input.videoReferences.map(mediaReferenceToFormValue));
     videoFiles.forEach((file) => body.append("video_reference[]", file));
     const audioFiles = kling ? [] : await Promise.all(input.audioReferences.map(mediaReferenceToFormValue));
@@ -291,8 +295,13 @@ function videoChannelText(config: AiConfig, model: string) {
     const channelId = channelIdForActiveModel(scopedConfig);
     const channels = config.channelMode === "remote" ? config.publicChannels : [localChannelForActiveModel(scopedConfig)];
     const channel = channels.find((item) => (item?.id || "") === channelId) || channels[0];
-    const record = channel as { id?: string; name?: string; baseUrl?: string; remark?: string } | undefined;
-    return [record?.id, record?.name, record?.baseUrl, record?.remark].filter(Boolean).join(" ").toLowerCase();
+    const record = channel as { id?: string; protocol?: string; name?: string; baseUrl?: string; remark?: string } | undefined;
+    return [record?.id, record?.protocol, record?.name, record?.baseUrl, record?.remark].filter(Boolean).join(" ").toLowerCase();
+}
+
+function isMiniMaxOfficialVideoConfig(config: AiConfig, model: string) {
+    const channel = videoChannelText(config, model);
+    return modelKey(model) === "minimax-h3" && (channel.includes("minimax") && !channel.includes("apimart") && !channel.includes("kie") || channel.includes("api.minimaxi.com"));
 }
 
 function normalizeCharacterOrientation(value: string | undefined) {
@@ -399,9 +408,9 @@ async function imageReferenceToFile(image: ReferenceImage) {
     return dataUrlToFile({ ...image, dataUrl: await imageToDataUrl(image) });
 }
 
-async function imageReferenceToFormValue(image: ReferenceImage) {
-    if (image.arkAssetId) return `asset://${image.arkAssetId}`;
-    if (image.dataUrl.startsWith("asset://")) return image.dataUrl;
+async function imageReferenceToFormValue(image: ReferenceImage, useArkAssetId = false) {
+    if (useArkAssetId && image.arkAssetId) return `asset://${image.arkAssetId}`;
+    if (useArkAssetId && image.dataUrl.startsWith("asset://")) return image.dataUrl;
     const resolvedUrl = await resolveImageUrl(image.storageKey, "");
     for (const url of [image.url, resolvedUrl, image.dataUrl]) {
         const publicUrl = publicHttpUrl(url);
@@ -491,6 +500,7 @@ function isGeminiOmniFlashVideoModel(model: string) {
 function normalizeVideoSecondsForModel(model: string, value: string) {
     const seconds = Number(normalizeVideoSeconds(value));
     const key = modelKey(model);
+    if (key === "grok-imagine-video-1-5-preview") return String(Math.max(1, Math.min(15, seconds)));
     if (key.includes("sora-2")) return closestAllowedSeconds(seconds, [4, 8, 12, 16, 20]);
     if (key.includes("veo3-1") || key.includes("veo-3-1")) return "8";
     if (key.includes("minimax-hailuo-02")) return closestAllowedSeconds(seconds, [5, 10]);
@@ -498,6 +508,7 @@ function normalizeVideoSecondsForModel(model: string, value: string) {
     if (key.includes("omni-flash-ext")) return closestAllowedSeconds(seconds, [4, 6, 8, 10]);
     if (key.includes("wan2-5") || key.includes("wan2.5")) return closestAllowedSeconds(seconds, [5, 10]);
     if (key === "wan2-6") return closestAllowedSeconds(seconds, [5, 10, 15]);
+    if (key.includes("grok-imagine")) return String(Math.max(6, Math.min(30, seconds)));
     return String(seconds);
 }
 

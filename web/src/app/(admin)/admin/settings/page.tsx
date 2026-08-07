@@ -52,6 +52,7 @@ const channelProtocolOptions = [
     { label: "火山方舟", value: "ark" },
     { label: "KIE", value: "kie" },
     { label: "Agnes", value: "agnes" },
+    { label: "MiniMax 官方", value: "minimax" },
 ];
 const channelProtocolLabels = Object.fromEntries(channelProtocolOptions.map((item) => [item.value, item.label]));
 const emptyStorageProvider: AdminStorageProvider = { id: "", name: "", type: "s3", endpoint: "", region: "auto", bucket: "", accessKeyId: "", secretAccessKey: "", publicBaseUrl: "", pathPrefix: "canvas", weight: 1, enabled: true, ownerUserId: "", capacityBytes: 0, capacityCheckedAt: "", capacityExceeded: false };
@@ -550,22 +551,13 @@ export default function AdminSettingsPage() {
                                                 },
                                                 {
                                                     title: "扣除算力点",
-                                                    width: 520,
+                                                    width: 640,
                                                     render: (_, item) => item.billingMode === "video" ? (
-                                                        <Space size={12} wrap>
-                                                            {(["480p", "720p", "1080p"] as const).map((resolution) => (
-                                                                <Space.Compact key={resolution}>
-                                                                    <span className="flex h-8 items-center rounded-l-md border border-r-0 border-stone-200 bg-stone-50 px-3 text-sm text-stone-500 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300">{resolution}</span>
-                                                                    <InputNumber min={0} step={1} precision={0} className="!w-24" value={item.videoRates[resolution]} onChange={(value) => setModelCost(form, setModelCosts, item.model, { videoRates: { ...item.videoRates, [resolution]: Number(value) || 0 } })} />
-                                                                    <span className="flex h-8 items-center rounded-r-md border border-l-0 border-stone-200 bg-stone-50 px-3 text-sm text-stone-500 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300">点/秒</span>
-                                                                </Space.Compact>
-                                                            ))}
-                                                            <Space.Compact>
-                                                                <span className="flex h-8 items-center rounded-l-md border border-r-0 border-stone-200 bg-stone-50 px-3 text-sm text-stone-500 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300">回退</span>
-                                                                <InputNumber min={0} step={1} precision={0} className="!w-24" value={item.credits} onChange={(value) => setModelCost(form, setModelCosts, item.model, Number(value) || 0)} />
-                                                                <span className="flex h-8 items-center rounded-r-md border border-l-0 border-stone-200 bg-stone-50 px-3 text-sm text-stone-500 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300">点</span>
-                                                            </Space.Compact>
-                                                        </Space>
+                                                        <VideoRateEditor
+                                                            item={item}
+                                                            onRatesChange={(videoRates) => setModelCost(form, setModelCosts, item.model, { videoRates })}
+                                                            onFallbackChange={(credits) => setModelCost(form, setModelCosts, item.model, credits)}
+                                                        />
                                                     ) : (
                                                         <Space.Compact className="!w-full">
                                                             <InputNumber min={0} step={1} precision={0} className="!w-full" value={item.credits} onChange={(value) => setModelCost(form, setModelCosts, item.model, Number(value) || 0)} />
@@ -894,7 +886,7 @@ export default function AdminSettingsPage() {
                                 </Form.Item>
                             </Col>
                             <Col span={12}>
-                                <Form.Item name="protocol" label="渠道类型" extra="New API 使用标准 OpenAI 接口；Sub2API 主要使用 Responses；Agnes Video 使用 Agnes 官方异步视频接口。">
+                                <Form.Item name="protocol" label="渠道类型" extra="New API 使用标准 OpenAI 接口；Sub2API 主要使用 Responses；Agnes 与 MiniMax 使用各自官方异步视频接口。">
                                     <Select options={channelProtocolOptions} onChange={setEditingChannelProtocol} />
                                 </Form.Item>
                             </Col>
@@ -1129,11 +1121,7 @@ function normalizeModelCosts(items: Partial<AdminSettings["public"]["modelChanne
         model: item.model || "",
         billingMode: item.billingMode === "video" ? "video" as const : "fixed" as const,
         credits: Math.max(0, Number(item.credits) || 0),
-        videoRates: {
-            "480p": Math.max(0, Number(item.videoRates?.["480p"]) || 0),
-            "720p": Math.max(0, Number(item.videoRates?.["720p"]) || 0),
-            "1080p": Math.max(0, Number(item.videoRates?.["1080p"]) || 0),
-        },
+        videoRates: Object.fromEntries(Object.entries(item.videoRates || {}).map(([resolution, rate]) => [normalizeVideoRateKey(resolution), Math.max(0, Number(rate) || 0)]).filter(([resolution]) => resolution)),
     }));
 }
 
@@ -1205,8 +1193,50 @@ function normalizeChannel(item: Partial<AdminModelChannel> = {}): AdminModelChan
     };
 }
 
+function VideoRateEditor({ item, onRatesChange, onFallbackChange }: { item: AdminModelCost; onRatesChange: (rates: Record<string, number>) => void; onFallbackChange: (credits: number) => void }) {
+    const [resolution, setResolution] = useState("");
+    const rates = item.videoRates || {};
+    const addResolution = () => {
+        const key = normalizeVideoRateKey(resolution);
+        if (!key) return;
+        onRatesChange({ ...rates, [key]: rates[key] || 0 });
+        setResolution("");
+    };
+    return (
+        <Flex vertical gap={8}>
+            <Flex gap={8} wrap>
+                {Object.entries(rates).sort(([left], [right]) => left.localeCompare(right, undefined, { numeric: true })).map(([key, rate]) => (
+                    <Space.Compact key={key}>
+                        <span className="flex h-8 min-w-14 items-center justify-center rounded-l-md border border-r-0 border-stone-200 bg-stone-50 px-2 text-sm text-stone-500 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300">{videoRateLabel(key)}</span>
+                        <InputNumber min={0} step={1} precision={0} className="!w-20" value={rate} onChange={(value) => onRatesChange({ ...rates, [key]: Number(value) || 0 })} />
+                        <span className="flex h-8 items-center border border-x-0 border-stone-200 bg-stone-50 px-2 text-xs text-stone-500 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300">点/秒</span>
+                        <Button danger icon={<DeleteOutlined />} aria-label={`删除 ${videoRateLabel(key)} 费率`} onClick={() => onRatesChange(Object.fromEntries(Object.entries(rates).filter(([resolution]) => resolution !== key)))} />
+                    </Space.Compact>
+                ))}
+                <Space.Compact>
+                    <span className="flex h-8 items-center rounded-l-md border border-r-0 border-stone-200 bg-stone-50 px-3 text-sm text-stone-500 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300">回退</span>
+                    <InputNumber min={0} step={1} precision={0} className="!w-20" value={item.credits} onChange={(value) => onFallbackChange(Number(value) || 0)} />
+                    <span className="flex h-8 items-center rounded-r-md border border-l-0 border-stone-200 bg-stone-50 px-3 text-sm text-stone-500 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300">点</span>
+                </Space.Compact>
+            </Flex>
+            <Space.Compact className="max-w-72">
+                <Input value={resolution} placeholder="新增分辨率，如 768P、2K" onChange={(event) => setResolution(event.target.value)} onPressEnter={addResolution} />
+                <Button icon={<PlusOutlined />} onClick={addResolution}>添加</Button>
+            </Space.Compact>
+        </Flex>
+    );
+}
+
+function normalizeVideoRateKey(value: string) {
+    return String(value || "").trim().toLowerCase().replaceAll(" ", "");
+}
+
+function videoRateLabel(value: string) {
+    return value.endsWith("k") ? `${value.slice(0, -1)}K` : value;
+}
+
 function modelCostItem(items: AdminModelCost[], model: string): AdminModelCost {
-    return items.find((item) => item.model === model) || { model, billingMode: "fixed", credits: 0, videoRates: { "480p": 0, "720p": 0, "1080p": 0 } };
+    return items.find((item) => item.model === model) || { model, billingMode: "fixed", credits: 0, videoRates: {} };
 }
 
 function setModelCost(form: any, setModelCosts: (items: AdminModelCost[]) => void, model: string, patch: Partial<AdminModelCost> | number) {

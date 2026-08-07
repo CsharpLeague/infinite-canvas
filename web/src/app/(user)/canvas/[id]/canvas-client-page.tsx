@@ -19,7 +19,7 @@ import { nanoid } from "nanoid";
 import { getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
 import { canvasThemes, type CanvasBackgroundMode } from "@/lib/canvas-theme";
 import { UserStatusActions } from "@/components/layout/user-status-actions";
-import { isKIEKlingV3Config } from "@/components/video-settings-panel";
+import { defaultVideoResolutionForModel, isKIEKlingV3Config } from "@/components/video-settings-panel";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { cropDataUrl, splitDataUrl, upscaleDataUrl } from "../utils/canvas-image-data";
@@ -946,7 +946,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                         count: getGenerationCount(effectiveConfig.canvasImageCount || effectiveConfig.count),
                     }
                     : type === CanvasNodeType.Video
-                        ? { vquality: "480" }
+                        ? { vquality: defaultVideoResolutionForModel(effectiveConfig) }
                         : undefined;
             const newNode = createCanvasNode(
                 type,
@@ -962,7 +962,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
             setSelectedConnectionId(null);
             if (type !== CanvasNodeType.Text && type !== CanvasNodeType.Audio && type !== CanvasNodeType.Director) setDialogNodeId(newNode.id);
         },
-        [effectiveConfig.canvasImageCount, effectiveConfig.count, effectiveConfig.imageModel, effectiveConfig.model, effectiveConfig.size, getCanvasCenter],
+        [effectiveConfig, getCanvasCenter],
     );
 
     const deleteCanvasTaskRecords = useCallback(

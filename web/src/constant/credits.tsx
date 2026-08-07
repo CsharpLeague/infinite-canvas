@@ -13,11 +13,7 @@ export type ModelCreditCost = {
     model: string;
     billingMode?: "fixed" | "video";
     credits: number;
-    videoRates?: {
-        "480p"?: number;
-        "720p"?: number;
-        "1080p"?: number;
-    };
+    videoRates?: Record<string, number>;
 };
 
 export function modelCreditCost(modelCosts: ModelCreditCost[] | undefined, model: string) {
@@ -37,11 +33,11 @@ export function requestCreditCost(options: { channelMode: string; modelCosts?: M
     return (item?.credits || 0) * count;
 }
 
-function videoCreditResolution(resolution?: string, size?: string): "480p" | "720p" | "1080p" {
-    const selected = String(resolution || "").toLowerCase();
-    if (selected.includes("1080")) return "1080p";
-    if (selected.includes("720")) return "720p";
-    if (selected.includes("480")) return "480p";
+function videoCreditResolution(resolution?: string, size?: string) {
+    const selected = String(resolution || "").trim().toLowerCase().replaceAll(" ", "");
+    if (selected && !["auto", "high", "medium", "low"].includes(selected)) return /^\d+$/.test(selected) ? `${selected}p` : selected;
+    if (selected === "low") return "480p";
+    if (["auto", "high", "medium"].includes(selected)) return "720p";
     const dimensions = String(size || "").toLowerCase().match(/(\d+)\s*x\s*(\d+)/);
     const shortSide = dimensions ? Math.min(Number(dimensions[1]), Number(dimensions[2])) : 0;
     if (shortSide >= 900) return "1080p";

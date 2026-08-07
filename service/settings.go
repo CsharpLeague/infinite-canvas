@@ -83,6 +83,9 @@ func AdminTestChannelModel(index *int, channel model.ModelChannel, modelName str
 	if isAgnesAdminChannel(resolved) && isAgnesVideoModelName(modelName) {
 		return testConfiguredGenerationModel(resolved, modelName, "Agnes")
 	}
+	if strings.EqualFold(strings.TrimSpace(resolved.Protocol), "minimax") {
+		return testConfiguredGenerationModel(resolved, modelName, "MiniMax")
+	}
 	if isImageModelName(modelName) {
 		return testConfiguredGenerationModel(resolved, modelName, channelDisplayName(resolved))
 	}
@@ -101,6 +104,8 @@ func channelDisplayName(channel model.ModelChannel) string {
 		return "KIE"
 	case "agnes":
 		return "Agnes"
+	case "minimax":
+		return "MiniMax 官方"
 	default:
 		return "OpenAI"
 	}
@@ -219,9 +224,13 @@ func normalizePublicSettingWithChannels(setting model.PublicSetting, channels []
 			item.BillingMode = "fixed"
 		}
 		item.Credits = max(item.Credits, 0)
-		item.VideoRates.P480 = max(item.VideoRates.P480, 0)
-		item.VideoRates.P720 = max(item.VideoRates.P720, 0)
-		item.VideoRates.P1080 = max(item.VideoRates.P1080, 0)
+		rates := map[string]int{}
+		for resolution, rate := range item.VideoRates {
+			if key := normalizeVideoRateKey(resolution); key != "" {
+				rates[key] = max(rate, 0)
+			}
+		}
+		item.VideoRates = rates
 	}
 	if setting.ModelChannel.AllowCustomChannel == nil {
 		enabled := true
@@ -253,17 +262,15 @@ func VideoModelCost(modelName string, resolution string, seconds int) (int, erro
 	if err != nil || item.BillingMode != "video" {
 		return item.Credits, err
 	}
-	rate := item.VideoRates.P480
-	switch strings.ToLower(strings.TrimSpace(resolution)) {
-	case "720p":
-		rate = item.VideoRates.P720
-	case "1080p":
-		rate = item.VideoRates.P1080
-	}
+	rate := item.VideoRates[normalizeVideoRateKey(resolution)]
 	if rate <= 0 || seconds <= 0 {
 		return item.Credits, nil
 	}
 	return rate * seconds, nil
+}
+
+func normalizeVideoRateKey(value string) string {
+	return strings.ToLower(strings.ReplaceAll(strings.TrimSpace(value), " ", ""))
 }
 
 func modelCostSetting(modelName string) (model.ModelCost, error) {
@@ -399,6 +406,12 @@ func HTTPClientForChannel(channel model.ModelChannel) *http.Client {
 
 func BuildModelChannelURL(channel model.ModelChannel, path string) string {
 	baseURL := normalizeModelChannelBaseURL(channel.BaseURL)
+	if strings.EqualFold(strings.TrimSpace(channel.Protocol), "minimax") {
+		if index := strings.Index(strings.ToLower(baseURL), "/v2"); index >= 0 {
+			baseURL = baseURL[:index]
+		}
+		return baseURL + path
+	}
 	lowerBaseURL := strings.ToLower(baseURL)
 	if !strings.HasSuffix(lowerBaseURL, "/v1") && !strings.HasSuffix(lowerBaseURL, "/api/v3") && !strings.HasSuffix(lowerBaseURL, "/api/plan/v3") {
 		baseURL += "/v1"
@@ -498,7 +511,7 @@ func repairDefaultModel(current string, models []string, preferred func(string) 
 
 func isVideoModelName(modelName string) bool {
 	name := strings.ToLower(strings.TrimSpace(modelName))
-	return strings.Contains(name, "seedance") || strings.Contains(name, "video")
+	return strings.Contains(name, "seedance") || strings.Contains(name, "video") || strings.Contains(name, "minimax")
 }
 
 func isImageModelName(modelName string) bool {
@@ -564,6 +577,9 @@ func resolveAdminChannel(index *int, channel model.ModelChannel) (model.ModelCha
 }
 
 func fetchAdminChannelModels(channel model.ModelChannel) ([]string, error) {
+	if strings.EqualFold(strings.TrimSpace(channel.Protocol), "minimax") {
+		return []string{"MiniMax-H3"}, nil
+	}
 	if isKIEAdminChannel(channel) {
 		result := kieMarketModels()
 		sort.Strings(result)

@@ -836,7 +836,7 @@ func kieModelInputConfig(modelName string) kieInputConfig {
 		"gemini-omni-video":                 {aspectField: "aspect_ratio", durationKind: "string", hasResolution: true, imageRefField: "image_urls", imageRefKind: "array", videoRefField: "video_list", videoRefKind: "gemini_video_list", audioRefField: "audio_ids", audioRefKind: "array"},
 		"grok-imagine/image-to-video":       {aspectField: "aspect_ratio", durationKind: "string", durationMin: 6, durationMax: 30, hasResolution: true, presetField: "mode", imageRefField: "image_urls", imageRefKind: "array"},
 		"grok-imagine/text-to-video":        {aspectField: "aspect_ratio", durationKind: "string", durationMin: 6, durationMax: 30, hasResolution: true, presetField: "mode"},
-		"grok-imagine-video-1-5-preview":    {aspectField: "aspect_ratio", durationKind: "number", hasResolution: true, imageRefField: "image_urls", imageRefKind: "array"},
+		"grok-imagine-video-1-5-preview":    {aspectField: "aspect_ratio", durationKind: "number", durationMin: 1, durationMax: 15, hasResolution: true, imageRefField: "image_urls", imageRefKind: "single_array"},
 		"happyhorse/image-to-video":         {durationKind: "number", hasResolution: true, imageRefField: "image_urls", imageRefKind: "array"},
 		"happyhorse/reference-to-video":     {aspectField: "aspect_ratio", durationKind: "number", hasResolution: true, imageRefField: "reference_image", imageRefKind: "array"},
 		"happyhorse/text-to-video":          {aspectField: "aspect_ratio", durationKind: "number", hasResolution: true},

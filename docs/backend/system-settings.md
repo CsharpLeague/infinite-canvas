@@ -20,7 +20,7 @@ description: settings 表中 public 和 private 配置结构说明
     "availableModels": ["gpt-5.5", "gpt-image-2"],
     "modelCosts": [
       { "model": "gpt-5.5", "billingMode": "fixed", "credits": 1 },
-      { "model": "seedance-video", "billingMode": "video", "credits": 0, "videoRates": { "480p": 5, "720p": 10, "1080p": 20 } }
+      { "model": "MiniMax-H3", "billingMode": "video", "credits": 0, "videoRates": { "768p": 9, "2k": 15 } }
     ],
     "defaultModel": "gpt-image-2",
     "defaultImageModel": "gpt-image-2",
@@ -62,7 +62,7 @@ description: settings 表中 public 和 private 配置结构说明
 | `model` | string | 模型名称 |
 | `billingMode` | string | `fixed` 固定扣费；`video` 按视频分辨率和秒数扣费 |
 | `credits` | number | 固定扣费点数；视频参数无法识别或对应费率为 0 时作为回退值 |
-| `videoRates` | object | 视频每秒费率，包含 `480p`、`720p`、`1080p` |
+| `videoRates` | object | 视频每秒费率；键为模型实际支持的分辨率名称，例如 `480p`、`768p`、`1080p`、`2k`，值为每秒点数 |
 
 用户侧请求模式：
 

@@ -509,6 +509,18 @@ func resolveAIProxyPath(channel model.ModelChannel, modelName string, path strin
 	if isSub2APITextRequest(channel, path) {
 		return "/responses"
 	}
+	if isMiniMaxVideoChannel(channel, modelName) {
+		if path == "/videos" {
+			return "/v2/video_generation"
+		}
+		if strings.HasPrefix(path, "/videos/") && !strings.HasSuffix(path, "/content") {
+			taskID := strings.TrimSpace(strings.TrimPrefix(path, "/videos/"))
+			if taskID != "" && !strings.Contains(taskID, "/") {
+				return "/v2/query/video_generation/" + url.PathEscape(taskID)
+			}
+		}
+		return path
+	}
 	if isKIEChannel(channel, modelName) {
 		if path == "/videos" || path == "/images/generations" || path == "/images/edits" {
 			return "/jobs/createTask"

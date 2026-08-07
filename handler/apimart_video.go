@@ -165,6 +165,9 @@ func normalizeAPIMartVideoParams(payload map[string]any, modelName string, chann
 
 	normalizeAPIMartAspect(payload, config)
 	normalizeAPIMartDuration(payload, config)
+	if strings.Contains(normalizeAPIMartModelName(modelName), "grok-imagine") {
+		payload[config.durationField] = clampAPIMartInt(payload[config.durationField], 6, 30)
+	}
 	normalizeAPIMartVideoMode(payload, config)
 	normalizeAPIMartKlingV3Advanced(payload, modelName, channel)
 	normalizeAPIMartResolution(payload, config)
@@ -393,6 +396,17 @@ func normalizeAPIMartDuration(payload map[string]any, config apimartInputConfig)
 		delete(payload, "duration")
 	}
 	delete(payload, "seconds")
+}
+
+func clampAPIMartInt(value any, minValue, maxValue int) int {
+	normalized := normalizeAPIMartInt(value)
+	if normalized < minValue {
+		return minValue
+	}
+	if normalized > maxValue {
+		return maxValue
+	}
+	return normalized
 }
 
 func normalizeAPIMartResolution(payload map[string]any, config apimartInputConfig) {
