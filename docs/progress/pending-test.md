@@ -144,4 +144,15 @@ description: 当前版本已实现但仍需人工验证的变更项
 - 创建与查询任务分别适配 Video Generation V2 官方接口，任务状态和视频地址转换为项目统一格式。
 - 支持文生视频、首帧、尾帧、首尾帧以及参考图片、视频、音频；首尾帧与多模态参考模式互斥。
 - MiniMax 素材仅发送公网 HTTP(S) 地址；本地文件未上传云存储时会返回明确提示。
+- 正式生成前先调用 H3-Context-IR 对相同的多模态上下文做异步预审和提示词增强；敏感或失败时不创建正式视频任务、不扣视频生成算力点，成功后使用 `content.prompt` 提交生成。
+- 视频任务响应返回 `context_ir_task_id`、`context_ir_status` 和 `enhanced_prompt`，前端任务对象可查看并保存实际用于生成的增强提示词。
+- H3-Context-IR 的任务提交和每次结果轮询都会写入 AI 调用日志；前端会将 `input new_sensitive`、`input text sensitive` 转换为中文安全审核提示。
+
+## 字字动画视频渠道
+
+- 管理后台新增 `字字动画` 渠道类型；渠道地址填写 `https://www.zizidonghua.com`，创建任务使用 `/v8/videos/generations`，查询任务使用 `/v8/videos/generations/{task_id}`。
+- 画布视频参数会转换为该渠道要求的 JSON，并将参考图转换为顶层 `reference_images`；仅传递公网 HTTP(S) 地址，不传火山素材 ID 或本地文件。
+- 选中字字动画渠道的模型后，视频设置隐藏清晰度和像素尺寸，改为横屏、竖屏、方形三个画面比例；请求不传 `resolution`，仅传 `aspect_ratio`，清晰度由 `zzdh-*-480p/720p/1080p/2k` 模型自身决定。
+- 创建与查询响应支持递归解包 `data.data`，将 `NOT_START`、`IN_PROGRESS` 等状态映射为项目任务状态，并解析百分比进度、`fail_reason`、内层错误和最终视频地址，保证后台轮询不会因未知状态提前停止。
+- `dispatched`、`accepted`、`started`、`generating` 等上游中间状态统一映射为 `processing`；待轮询查询兼容修复前已保存的原始状态，使现有任务重启后也能恢复查询。
 - 前端为 `MiniMax-H3` 提供 768P/2K、官方六种画面比例、4 至 15 秒及 AIGC 水印设置。

@@ -55,6 +55,8 @@ type VideoTaskCreateInput struct {
 	ErrorDetail     string
 	RequestBody     string
 	ResponseBody    string
+	ContextIRTaskID string
+	EnhancedPrompt  string
 	Credits         int
 }
 
@@ -108,6 +110,8 @@ func CreateVideoTask(input VideoTaskCreateInput) (model.VideoTask, error) {
 		RequestBody:     input.RequestBody,
 		ResponseBody:    input.ResponseBody,
 		LastResponse:    input.ResponseBody,
+		ContextIRTaskID: strings.TrimSpace(input.ContextIRTaskID),
+		EnhancedPrompt:  strings.TrimSpace(input.EnhancedPrompt),
 		Credits:         input.Credits,
 		CreatedAt:       current,
 		UpdatedAt:       current,
@@ -178,6 +182,9 @@ func VideoTaskResponse(task model.VideoTask) map[string]any {
 		"progress":      task.Progress,
 		"task_id":       firstVideoTaskValue(task.UpstreamTaskID, task.ID),
 		"video_id":      task.UpstreamVideoID,
+		"context_ir_task_id": task.ContextIRTaskID,
+		"context_ir_status":  miniMaxContextIRStatus(task.ContextIRTaskID),
+		"enhanced_prompt":    task.EnhancedPrompt,
 		"seconds":       task.Seconds,
 		"size":          task.Size,
 		"created_at":    task.CreatedAt,
@@ -211,6 +218,13 @@ func VideoTaskResponse(task model.VideoTask) map[string]any {
 		result["error_detail"] = task.ErrorDetail
 	}
 	return result
+}
+
+func miniMaxContextIRStatus(taskID string) string {
+	if strings.TrimSpace(taskID) != "" {
+		return "succeeded"
+	}
+	return ""
 }
 
 func StartVideoTaskPoller(poll VideoTaskPollFunc) {

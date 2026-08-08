@@ -87,6 +87,8 @@ export type CanvasNodeMetadata = {
     audioTaskResultId?: string;
     videoTaskId?: string;
     videoTaskVideoId?: string;
+	contextIrTaskId?: string;
+	enhancedPrompt?: string;
     firstFrameUrl?: string;
     firstFrameStorageKey?: string;
     lastFrameUrl?: string;

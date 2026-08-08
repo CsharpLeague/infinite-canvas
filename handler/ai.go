@@ -509,6 +509,18 @@ func resolveAIProxyPath(channel model.ModelChannel, modelName string, path strin
 	if isSub2APITextRequest(channel, path) {
 		return "/responses"
 	}
+	if isZizidonghuaVideoChannel(channel) {
+		if path == "/videos" {
+			return "/v8/videos/generations"
+		}
+		if strings.HasPrefix(path, "/videos/") && !strings.HasSuffix(path, "/content") {
+			taskID := strings.TrimSpace(strings.TrimPrefix(path, "/videos/"))
+			if taskID != "" && !strings.Contains(taskID, "/") {
+				return "/v8/videos/generations/" + url.PathEscape(taskID)
+			}
+		}
+		return path
+	}
 	if isMiniMaxVideoChannel(channel, modelName) {
 		if path == "/videos" {
 			return "/v2/video_generation"

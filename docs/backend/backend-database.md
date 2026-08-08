@@ -34,6 +34,8 @@ description: 当前后端主要数据表与字段说明
 
 后续新增表时再同步补充本文档，未实际使用的规划表不提前写入。
 
+手工升级数据库时，按版本执行对应的[迁移说明](./migrations/v0.5.1.md)。
+
 ### users
 
 系统用户表。用户基础信息、角色、算力点余额和第三方登录标识放在该表中。
@@ -129,6 +131,8 @@ description: 当前后端主要数据表与字段说明
 | `request_body` | text | 创建任务时的请求摘要 |
 | `response_body` | text | 创建任务时的响应摘要 |
 | `last_response` | text | 最近一次状态响应摘要 |
+| `context_ir_task_id` | string | MiniMax H3-Context-IR 预审任务 ID |
+| `enhanced_prompt` | text | MiniMax 预审成功后实际用于视频生成的增强提示词 |
 | `credits` | number | 创建任务时预扣算力点 |
 | `created_at` | string | 创建时间 |
 | `updated_at` | string | 更新时间 |

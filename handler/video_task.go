@@ -93,6 +93,19 @@ func proxyAIVideoTaskRequest(w http.ResponseWriter, r *http.Request) {
 		Fail(w, err.Error())
 		return
 	}
+	contextIR := miniMaxContextIRResult{}
+	if isMiniMaxVideoChannel(channel, modelName) {
+		body, contextIR, err = reviewMiniMaxVideoContext(r.Context(), body, channel, aiLogContext{
+			Model: modelName, Channel: channel, UserID: user.ID,
+			UserDisplayName: firstNonEmpty(user.DisplayName, user.Username),
+		})
+		if err != nil {
+			log.Printf("MiniMax video context review failed: model=%s err=%v", modelName, err)
+			Fail(w, err.Error())
+			return
+		}
+		contentType = "application/json"
+	}
 	request, err := http.NewRequest(http.MethodPost, service.BuildModelChannelURL(channel, upstreamPath), bytes.NewReader(body))
 	if err != nil {
 		log.Printf("AI video build request failed: url=%s err=%v", service.BuildModelChannelURL(channel, upstreamPath), err)
@@ -130,6 +143,7 @@ func proxyAIVideoTaskRequest(w http.ResponseWriter, r *http.Request) {
 			ChannelID: channel.ID, UserChannelID: userChannelID, ChannelName: channel.Name,
 			Source: taskSource, SourceID: taskSourceID, ClientTaskID: clientTaskID,
 			Status: "queued", RequestBody: logContext.RequestBody, Credits: credits,
+			ContextIRTaskID: contextIR.TaskID, EnhancedPrompt: contextIR.EnhancedPrompt,
 		})
 		if saveErr != nil {
 			log.Printf("save pending video task failed: model=%s err=%v", modelName, saveErr)
@@ -204,6 +218,8 @@ func proxyAIVideoTaskRequest(w http.ResponseWriter, r *http.Request) {
 		ErrorDetail:     parsed.ErrorDetail,
 		RequestBody:     logContext.RequestBody,
 		ResponseBody:    string(transformed),
+		ContextIRTaskID: contextIR.TaskID,
+		EnhancedPrompt:  contextIR.EnhancedPrompt,
 		Credits:         credits,
 	})
 	if err != nil {
@@ -348,6 +364,9 @@ func pollVideoTaskFromUpstream(task model.VideoTask) (service.VideoTaskPollUpdat
 }
 
 func normalizeVideoCreateBody(body []byte, contentType string, modelName string, channel model.ModelChannel, upstreamPath string) ([]byte, string, error) {
+	if isZizidonghuaVideoChannel(channel) && upstreamPath == "/v8/videos/generations" {
+		return normalizeZizidonghuaVideoBody(body, contentType, modelName)
+	}
 	if isMiniMaxVideoChannel(channel, modelName) && upstreamPath == "/v2/video_generation" {
 		return normalizeMiniMaxVideoBody(body, contentType, modelName)
 	}
@@ -374,6 +393,11 @@ func doAIRequest(request *http.Request, channel model.ModelChannel) ([]byte, int
 }
 
 func transformVideoCreatePayload(payload []byte, request *http.Request, channel model.ModelChannel, modelName string) []byte {
+	if isZizidonghuaVideoChannel(channel) && strings.Contains(request.URL.Path, "/v8/videos/generations") {
+		if transformed, ok := transformZizidonghuaVideoResponse(payload); ok {
+			return transformed
+		}
+	}
 	if isMiniMaxVideoChannel(channel, modelName) && strings.Contains(request.URL.Path, "/v2/video_generation") {
 		if transformed, ok := transformMiniMaxCreateVideoResponse(payload, modelName); ok {
 			return transformed
@@ -393,6 +417,11 @@ func transformVideoCreatePayload(payload []byte, request *http.Request, channel 
 }
 
 func transformVideoStatusPayload(payload []byte, request *http.Request, channel model.ModelChannel, modelName string) []byte {
+	if isZizidonghuaVideoChannel(channel) && strings.Contains(request.URL.Path, "/v8/videos/generations/") {
+		if transformed, ok := transformZizidonghuaVideoResponse(payload); ok {
+			return transformed
+		}
+	}
 	if isMiniMaxVideoChannel(channel, modelName) && strings.Contains(request.URL.Path, "/v2/query/video_generation/") {
 		if transformed, ok := transformMiniMaxVideoTaskResponse(payload); ok {
 			return transformed

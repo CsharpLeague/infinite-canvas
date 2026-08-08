@@ -4669,6 +4669,8 @@ function applyCanvasVideoTaskUpdate(nodes: CanvasNodeData[], nodeId: string, tas
             progress,
             videoTaskId: task.task_id || task.id || node.metadata?.videoTaskId,
             videoTaskVideoId: task.video_id || node.metadata?.videoTaskVideoId,
+			contextIrTaskId: task.context_ir_task_id || node.metadata?.contextIrTaskId,
+			enhancedPrompt: task.enhanced_prompt || node.metadata?.enhancedPrompt,
             firstFrameUrl: task.first_frame_url || task.firstFrameUrl || node.metadata?.firstFrameUrl,
             firstFrameStorageKey: task.firstFrameStorageKey || node.metadata?.firstFrameStorageKey,
             lastFrameUrl: task.last_frame_url || task.lastFrameUrl || node.metadata?.lastFrameUrl,

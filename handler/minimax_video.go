@@ -2,16 +2,26 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"mime"
 	"mime/multipart"
+	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/tigerowo/infinite-canvas/model"
+	"github.com/tigerowo/infinite-canvas/service"
 )
+
+type miniMaxContextIRResult struct {
+	TaskID         string
+	EnhancedPrompt string
+}
 
 type miniMaxVideoContent struct {
 	Type     string           `json:"type"`
@@ -111,6 +121,111 @@ func normalizeMiniMaxVideoBody(body []byte, contentType string, modelName string
 	}
 	encoded, err := json.Marshal(payload)
 	return encoded, "application/json", err
+}
+
+func reviewMiniMaxVideoContext(ctx context.Context, body []byte, channel model.ModelChannel, logContext aiLogContext) ([]byte, miniMaxContextIRResult, error) {
+	var videoPayload map[string]any
+	if json.Unmarshal(body, &videoPayload) != nil {
+		return nil, miniMaxContextIRResult{}, errors.New("MiniMax 预审请求格式无效")
+	}
+	reviewPayload := map[string]any{"model": "MiniMax-H3", "content": videoPayload["content"], "duration": videoPayload["duration"], "ratio": videoPayload["ratio"]}
+	reviewBody, _ := json.Marshal(reviewPayload)
+	logContext.StartedAt = time.Now()
+	logContext.Endpoint = "/v2/h3_context_ir"
+	logContext.Method = http.MethodPost
+	logContext.RequestBody = summarizeAIRequest(reviewBody, "application/json")
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, service.BuildModelChannelURL(channel, "/v2/h3_context_ir"), bytes.NewReader(reviewBody))
+	if err != nil {
+		saveAIProxyLog(logContext, 0, "", err.Error())
+		return nil, miniMaxContextIRResult{}, err
+	}
+	request.Header.Set("Authorization", "Bearer "+channel.APIKey)
+	request.Header.Set("Content-Type", "application/json")
+	payload, status, err := doAIRequest(request, channel)
+	if err != nil {
+		saveAIProxyLog(logContext, 0, "", err.Error())
+		return nil, miniMaxContextIRResult{}, fmt.Errorf("MiniMax 提示词预审失败：%w", err)
+	}
+	if status >= http.StatusBadRequest {
+		saveAIProxyLog(logContext, status, string(payload), readUpstreamAIErrorMessage(payload, status))
+		return nil, miniMaxContextIRResult{}, errors.New("MiniMax 提示词预审未通过：" + readUpstreamAIErrorMessage(payload, status))
+	}
+	saveAIProxyLog(logContext, status, string(payload), "")
+	var created struct {
+		TaskID string `json:"task_id"`
+	}
+	if json.Unmarshal(payload, &created) != nil || strings.TrimSpace(created.TaskID) == "" {
+		return nil, miniMaxContextIRResult{}, errors.New("MiniMax 提示词预审没有返回任务 ID")
+	}
+	result := miniMaxContextIRResult{TaskID: strings.TrimSpace(created.TaskID)}
+	deadline := time.NewTimer(3 * time.Minute)
+	defer deadline.Stop()
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, result, ctx.Err()
+		case <-deadline.C:
+			return nil, result, errors.New("MiniMax 提示词预审超时")
+		case <-ticker.C:
+			queryPath := "/v2/query/video_generation/" + url.PathEscape(result.TaskID)
+			queryLogContext := logContext
+			queryLogContext.StartedAt = time.Now()
+			queryLogContext.Endpoint = queryPath
+			queryLogContext.Method = http.MethodGet
+			queryLogContext.RequestBody = ""
+			query, requestErr := http.NewRequestWithContext(ctx, http.MethodGet, service.BuildModelChannelURL(channel, queryPath), nil)
+			if requestErr != nil {
+				saveAIProxyLog(queryLogContext, 0, "", requestErr.Error())
+				return nil, result, requestErr
+			}
+			query.Header.Set("Authorization", "Bearer "+channel.APIKey)
+			queryPayload, queryStatus, queryErr := doAIRequest(query, channel)
+			if queryErr != nil {
+				saveAIProxyLog(queryLogContext, 0, "", queryErr.Error())
+				continue
+			}
+			if queryStatus >= http.StatusBadRequest {
+				saveAIProxyLog(queryLogContext, queryStatus, string(queryPayload), readUpstreamAIErrorMessage(queryPayload, queryStatus))
+				return nil, result, errors.New("MiniMax 提示词预审查询失败：" + readUpstreamAIErrorMessage(queryPayload, queryStatus))
+			}
+			saveAIProxyLog(queryLogContext, queryStatus, string(queryPayload), "")
+			var queried struct {
+				Task struct {
+					Status  string `json:"status"`
+					Content struct {
+						Prompt string `json:"prompt"`
+					} `json:"content"`
+					Error struct {
+						Message string `json:"message"`
+					} `json:"error"`
+				} `json:"task"`
+			}
+			if json.Unmarshal(queryPayload, &queried) != nil {
+				continue
+			}
+			switch strings.ToLower(strings.TrimSpace(queried.Task.Status)) {
+			case "succeeded", "success", "completed":
+				result.EnhancedPrompt = strings.TrimSpace(queried.Task.Content.Prompt)
+				if result.EnhancedPrompt == "" {
+					return nil, result, errors.New("MiniMax 提示词预审完成但没有返回增强提示词")
+				}
+				content, _ := videoPayload["content"].([]any)
+				for _, item := range content {
+					if record, ok := item.(map[string]any); ok && strings.EqualFold(toStringSafe(record["type"]), "text") {
+						record["text"] = result.EnhancedPrompt
+						break
+					}
+				}
+				enhancedBody, marshalErr := json.Marshal(videoPayload)
+				return enhancedBody, result, marshalErr
+			case "failed", "fail", "cancelled", "canceled":
+				message := firstNonEmpty(queried.Task.Error.Message, "输入内容未通过 MiniMax 提示词预审")
+				return nil, result, errors.New("MiniMax 提示词预审未通过：" + message)
+			}
+		}
+	}
 }
 
 func transformMiniMaxCreateVideoResponse(payload []byte, modelName string) ([]byte, bool) {

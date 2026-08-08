@@ -3,6 +3,9 @@ export function friendlyAIErrorMessage(value: unknown, fallback = "请求失败"
     if (!raw) return fallback;
     const text = raw.toLowerCase();
 
+    if (includesAny(text, ["input new_sensitive", "input text sensitive"])) {
+        return "输入的提示词或参考素材包含敏感内容，未通过 MiniMax 安全审核。请调整相关描述或更换素材后重试。";
+    }
     if (text.includes("real person")) {
         const contentIndex = raw.match(/content\[(\d+)\]/i)?.[1];
         const imageLabel = contentIndex ? `第 ${Math.max(1, Number(contentIndex))} 张参考图片` : "参考图片";

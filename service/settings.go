@@ -86,6 +86,9 @@ func AdminTestChannelModel(index *int, channel model.ModelChannel, modelName str
 	if strings.EqualFold(strings.TrimSpace(resolved.Protocol), "minimax") {
 		return testConfiguredGenerationModel(resolved, modelName, "MiniMax")
 	}
+	if strings.EqualFold(strings.TrimSpace(resolved.Protocol), "zizidonghua") {
+		return testConfiguredGenerationModel(resolved, modelName, "字字动画")
+	}
 	if isImageModelName(modelName) {
 		return testConfiguredGenerationModel(resolved, modelName, channelDisplayName(resolved))
 	}
@@ -106,6 +109,8 @@ func channelDisplayName(channel model.ModelChannel) string {
 		return "Agnes"
 	case "minimax":
 		return "MiniMax 官方"
+	case "zizidonghua":
+		return "字字动画"
 	default:
 		return "OpenAI"
 	}
@@ -406,6 +411,18 @@ func HTTPClientForChannel(channel model.ModelChannel) *http.Client {
 
 func BuildModelChannelURL(channel model.ModelChannel, path string) string {
 	baseURL := normalizeModelChannelBaseURL(channel.BaseURL)
+	if strings.EqualFold(strings.TrimSpace(channel.Protocol), "zizidonghua") {
+		for _, suffix := range []string{"/v8", "/v1"} {
+			if strings.HasSuffix(strings.ToLower(baseURL), suffix) {
+				baseURL = strings.TrimRight(baseURL[:len(baseURL)-len(suffix)], "/")
+				break
+			}
+		}
+		if path == "/models" {
+			path = "/v1/models"
+		}
+		return baseURL + path
+	}
 	if strings.EqualFold(strings.TrimSpace(channel.Protocol), "minimax") {
 		if index := strings.Index(strings.ToLower(baseURL), "/v2"); index >= 0 {
 			baseURL = baseURL[:index]

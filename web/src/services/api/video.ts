@@ -3,7 +3,7 @@ import axios from "axios";
 import { dataUrlToFile } from "@/lib/image-utils";
 import { friendlyAIErrorMessage } from "@/lib/ai-error-message";
 import { boolConfig, isSeedanceVideoConfig, normalizeSeedanceRatio } from "@/lib/seedance-video";
-import { isKIEGrokVideoModel } from "@/components/video-settings-panel";
+import { isKIEGrokVideoModel, isZizidonghuaVideoConfig } from "@/components/video-settings-panel";
 import { modelKey, supportsVideoAudioGeneration } from "@/lib/video-model-capabilities";
 import { resolveMediaUrl, uploadRemoteMediaToServer } from "@/services/file-storage";
 import { imageToDataUrl, resolveImageUrl } from "@/services/image-storage";
@@ -12,7 +12,7 @@ import { useUserStore } from "@/stores/use-user-store";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 
-export type VideoResponse = { id: string; task_id?: string; video_id?: string; source_id?: string; sourceId?: string; channelId?: string; userChannelId?: string; channelName?: string; channel_id?: string; user_channel_id?: string; channel_name?: string; status?: string; video_url?: string; url?: string; storageKey?: string; first_frame_url?: string; firstFrameUrl?: string; firstFrameStorageKey?: string; last_frame_url?: string; lastFrameUrl?: string; lastFrameStorageKey?: string; mimeType?: string; bytes?: number; progress?: number; error?: { message?: string }; size?: string; seconds?: string; model?: string; created_at?: string | number; createdAt?: string | number; started_at?: string | number; startedAt?: string | number; request_body?: string };
+export type VideoResponse = { id: string; task_id?: string; video_id?: string; source_id?: string; sourceId?: string; channelId?: string; userChannelId?: string; channelName?: string; channel_id?: string; user_channel_id?: string; channel_name?: string; status?: string; video_url?: string; url?: string; storageKey?: string; first_frame_url?: string; firstFrameUrl?: string; firstFrameStorageKey?: string; last_frame_url?: string; lastFrameUrl?: string; lastFrameStorageKey?: string; mimeType?: string; bytes?: number; progress?: number; error?: { message?: string }; size?: string; seconds?: string; model?: string; created_at?: string | number; createdAt?: string | number; started_at?: string | number; startedAt?: string | number; request_body?: string; context_ir_task_id?: string; context_ir_status?: string; enhanced_prompt?: string };
 type ApiVideoEnvelope = { code: number; data?: VideoResponse | VideoResponse[] | null; msg?: string; message?: string };
 type ApiVideoResponse = VideoResponse | ApiVideoEnvelope;
 export type VideoGenerationResult = { id: string; url: string; durationMs: number; width: number; height: number; bytes: number; mimeType: string; task: VideoResponse };
@@ -37,12 +37,18 @@ function usesAccountProxy(config: AiConfig) {
 }
 
 function aiApiUrl(config: AiConfig, path: string) {
-    if (usesAccountProxy(config)) return `/api/v1${path}`;
-    const channel = localChannelForActiveModel(config);
-    return buildApiUrl(channel?.baseUrl || config.baseUrl, path);
+	if (usesAccountProxy(config)) return `/api/v1${path}`;
+	const channel = localChannelForActiveModel(config);
+	if (isZizidonghuaVideoConfig(config) && path === "/videos") return `${zizidonghuaBaseUrl(channel?.baseUrl || config.baseUrl)}/v8/videos/generations`;
+	return buildApiUrl(channel?.baseUrl || config.baseUrl, path);
 }
 
 function aiVideoPollUrl(config: AiConfig, model: string, id: string) {
+	if (isZizidonghuaVideoConfig(config, model)) {
+		if (usesAccountProxy(config)) return `/api/v1/videos/${encodeURIComponent(id)}`;
+		const channel = localChannelForActiveModel(config);
+		return `${zizidonghuaBaseUrl(channel?.baseUrl || config.baseUrl)}/v8/videos/generations/${encodeURIComponent(id)}`;
+	}
     if (!isAgnesVideoConfig(config, model) || !id.startsWith("video_")) {
         return aiApiUrl(config, `/videos/${encodeURIComponent(id)}`);
     }
@@ -184,8 +190,22 @@ export async function deleteVideoGenerationTask(config: AiConfig, task?: VideoRe
 }
 
 async function createVideoRequestBody(config: AiConfig, model: string, prompt: string, input: Required<VideoReferenceInput>) {
-    const miniMaxH3 = isMiniMaxOfficialVideoConfig(config, model);
-    const size = miniMaxH3 ? config.size || "16:9" : normalizeVideoSize(config.size);
+	const miniMaxH3 = isMiniMaxOfficialVideoConfig(config, model);
+	const size = miniMaxH3 ? config.size || "16:9" : normalizeVideoSize(config.size);
+	if (isZizidonghuaVideoConfig(config, model)) {
+		const aspectRatio = normalizeZizidonghuaAspectRatio(config.size);
+		const references = await Promise.all(input.references.slice(0, 9).map((image) => imageReferenceToPublicUrl(image)));
+		if (input.firstFrame) references.push(await imageReferenceToPublicUrl(input.firstFrame, "first_frame"));
+		if (input.lastFrame) references.push(await imageReferenceToPublicUrl(input.lastFrame, "last_frame"));
+		return {
+			model,
+			prompt,
+			duration: Number(normalizeVideoSecondsForModel(model, config.videoSeconds)),
+			aspect_ratio: aspectRatio,
+			...(config.videoNegativePrompt?.trim() ? { negative_prompt: config.videoNegativePrompt.trim() } : {}),
+			...(references.length ? { reference_images: references } : {}),
+		};
+	}
     if (isAgnesVideoConfig(config, model)) {
         const references = input.references;
         const inputReferences = await Promise.all(references.slice(0, 7).map(imageToAgnesReference));
@@ -510,6 +530,26 @@ function normalizeVideoSecondsForModel(model: string, value: string) {
     if (key === "wan2-6") return closestAllowedSeconds(seconds, [5, 10, 15]);
     if (key.includes("grok-imagine")) return String(Math.max(6, Math.min(30, seconds)));
     return String(seconds);
+}
+
+async function imageReferenceToPublicUrl(image: ReferenceImage, role = "") {
+	const resolvedUrl = await resolveImageUrl(image.storageKey, "");
+	for (const value of [image.url, resolvedUrl, image.dataUrl]) {
+		const url = publicHttpUrl(value);
+		if (url) return role ? { url, role } : { url };
+	}
+	throw new VideoRequestError("字字动画仅支持公网参考图地址，请先将素材上传到云存储");
+}
+
+function zizidonghuaBaseUrl(value: string) {
+	return value.trim().replace(/\/+$/, "").replace(/\/(?:v1|v8)$/i, "");
+}
+
+function normalizeZizidonghuaAspectRatio(value: string) {
+	const normalized = String(value || "").trim().toLowerCase();
+	if (["9:16", "720x1280", "1080x1920"].includes(normalized)) return "9:16";
+	if (["1:1", "720x720", "960x960", "1080x1080"].includes(normalized)) return "1:1";
+	return "16:9";
 }
 
 function closestAllowedSeconds(seconds: number, allowed: number[]) {

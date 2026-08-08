@@ -23,6 +23,12 @@ const sizeOptions = [
     { value: "auto", label: "auto", width: 0, height: 0 },
 ];
 
+const zizidonghuaRatioOptions = [
+	{ value: "16:9", label: "横屏", width: 16, height: 9 },
+	{ value: "9:16", label: "竖屏", width: 9, height: 16 },
+	{ value: "1:1", label: "方形", width: 1, height: 1 },
+] as const;
+
 const secondOptions = [6, 10, 12, 16, 20];
 const miniMaxRatioOptions = ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"] as const;
 const miniMaxDurationOptions = Array.from({ length: 12 }, (_, index) => index + 4);
@@ -69,6 +75,8 @@ export function VideoSettingsPanel({ config, modelName, onConfigChange, theme, s
     const model = modelName || config.model || config.videoModel;
     const modelNameKey = modelKey(model);
     const grokVideo = modelNameKey.includes("grok-imagine");
+	const zizidonghuaVideo = isZizidonghuaVideoConfig(config, model);
+	const zizidonghuaRatio = normalizeZizidonghuaRatio(config.size);
     const grokMode = config.videoMode === "fun" || config.videoMode === "spicy" ? config.videoMode : "normal";
     const seconds = config.videoSeconds || "6";
     const size = normalizeVideoSizeValue(config.size);
@@ -96,17 +104,39 @@ export function VideoSettingsPanel({ config, modelName, onConfigChange, theme, s
                         </div>
                     </SettingGroup>
                 ) : null}
-                <SettingGroup title="清晰度" color={theme.node.muted}>
-                    <div className="grid grid-cols-3 gap-2.5">
-                        {resolutionOptions.map((item) => (
-                            <OptionPill key={item.value} selected={resolution === item.value} theme={theme} onClick={() => onConfigChange("vquality", item.value)}>
-                                {item.label}
-                            </OptionPill>
-                        ))}
-                        <ResolutionInput value={resolution} theme={theme} onChange={(value) => onConfigChange("vquality", value)} />
-                    </div>
-                </SettingGroup>
-                <SettingGroup title="尺寸" color={theme.node.muted}>
+				{zizidonghuaVideo ? null : (
+					<SettingGroup title="清晰度" color={theme.node.muted}>
+						<div className="grid grid-cols-3 gap-2.5">
+							{resolutionOptions.map((item) => (
+								<OptionPill key={item.value} selected={resolution === item.value} theme={theme} onClick={() => onConfigChange("vquality", item.value)}>
+									{item.label}
+								</OptionPill>
+							))}
+							<ResolutionInput value={resolution} theme={theme} onChange={(value) => onConfigChange("vquality", value)} />
+						</div>
+					</SettingGroup>
+				)}
+				{zizidonghuaVideo ? (
+					<SettingGroup title="画面比例" color={theme.node.muted}>
+						<div className="grid grid-cols-3 gap-2.5">
+							{zizidonghuaRatioOptions.map((item) => (
+								<button
+									key={item.value}
+									type="button"
+									className="flex h-[68px] cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border bg-transparent text-sm transition hover:opacity-80"
+									style={{ borderColor: zizidonghuaRatio === item.value ? theme.node.text : theme.node.stroke, color: theme.node.text }}
+									onMouseDown={(event) => event.stopPropagation()}
+									onClick={() => onConfigChange("size", item.value)}
+								>
+									<SizePreview width={item.width} height={item.height} color={theme.node.text} />
+									<span>{item.label}</span>
+									<span className="text-[11px] leading-none opacity-55">{item.value}</span>
+								</button>
+							))}
+						</div>
+					</SettingGroup>
+				) : (
+				<SettingGroup title="尺寸" color={theme.node.muted}>
                     <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2.5">
                         <DimensionInput prefix="W" value={dimensions.width} disabled={size === "auto"} theme={theme} onChange={(value) => updateDimension("width", value)} />
                         <span className="text-lg opacity-45">↔</span>
@@ -132,7 +162,8 @@ export function VideoSettingsPanel({ config, modelName, onConfigChange, theme, s
                             </button>
                         ))}
                     </div>
-                </SettingGroup>
+				</SettingGroup>
+				)}
                 {!visualOnly ? (
                     <>
                         <SettingGroup title="秒数" color={theme.node.muted}>
@@ -505,6 +536,23 @@ function isMiniMaxOfficialConfig(config: AiConfig, modelName: string) {
     const channel = channels.find((item) => (item?.id || "") === channelId) || channels[0];
     const record = channel as { protocol?: string; name?: string; baseUrl?: string } | undefined;
     return record?.protocol === "minimax" || (record?.baseUrl || "").toLowerCase().includes("api.minimaxi.com");
+}
+
+export function isZizidonghuaVideoConfig(config: AiConfig, modelName = config.model || config.videoModel) {
+	const model = modelName || config.model || config.videoModel;
+	const scopedConfig = { ...config, model, videoModel: model };
+	const channelId = channelIdForActiveModel(scopedConfig);
+	const channels = config.channelMode === "remote" ? config.publicChannels : [localChannelForActiveModel(scopedConfig)];
+	const channel = channels.find((item) => (item?.id || "") === channelId) || channels[0];
+	const record = channel as { protocol?: string; name?: string; baseUrl?: string } | undefined;
+	return record?.protocol === "zizidonghua" || (record?.baseUrl || "").toLowerCase().includes("zizidonghua.com");
+}
+
+function normalizeZizidonghuaRatio(value: string) {
+	const normalized = String(value || "").trim().toLowerCase();
+	if (["9:16", "720x1280", "1080x1920"].includes(normalized)) return "9:16";
+	if (["1:1", "720x720", "960x960", "1024x1024", "1080x1080"].includes(normalized)) return "1:1";
+	return "16:9";
 }
 
 function normalizeKlingV26Ratio(value: string) {

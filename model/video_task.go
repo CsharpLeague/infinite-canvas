@@ -29,6 +29,8 @@ type VideoTask struct {
 	RequestBody     string `json:"requestBody" gorm:"type:text"`
 	ResponseBody    string `json:"responseBody" gorm:"type:text"`
 	LastResponse    string `json:"lastResponse" gorm:"type:text"`
+	ContextIRTaskID string `json:"contextIrTaskId" gorm:"index"`
+	EnhancedPrompt  string `json:"enhancedPrompt" gorm:"type:text"`
 	Credits         int    `json:"credits"`
 	CreatedAt       string `json:"createdAt" gorm:"index;index:idx_video_tasks_status_created_at,priority:2"`
 	UpdatedAt       string `json:"updatedAt" gorm:"index"`

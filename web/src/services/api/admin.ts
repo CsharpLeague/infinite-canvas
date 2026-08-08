@@ -163,7 +163,7 @@ export async function deleteAdminAsset(token: string, id: string) {
 
 export type AdminModelChannel = {
     id: string;
-    protocol: "openai" | "newapi" | "sub2api" | "ark" | "kie" | "agnes" | "minimax";
+    protocol: "openai" | "newapi" | "sub2api" | "ark" | "kie" | "agnes" | "minimax" | "zizidonghua";
     name: string;
     baseUrl: string;
     apiKey: string;

@@ -10,7 +10,7 @@ import { useUserStore } from "@/stores/use-user-store";
 
 export type LocalModelChannel = {
     id: string;
-    protocol?: "openai" | "newapi" | "sub2api" | "ark" | "kie" | "agnes" | "minimax";
+    protocol?: "openai" | "newapi" | "sub2api" | "ark" | "kie" | "agnes" | "minimax" | "zizidonghua";
     name: string;
     baseUrl: string;
     apiKey: string;
@@ -70,7 +70,7 @@ export type AiConfig = {
         workflowAgent: string;
     };
     localChannels: LocalModelChannel[];
-    publicChannels: Array<{ id?: string; protocol?: "openai" | "newapi" | "sub2api" | "ark" | "kie" | "agnes" | "minimax"; name?: string; baseUrl?: string; models?: string[]; weight?: number; timeout?: number; enabled?: boolean; remark?: string; virtualPortraitEnabled?: boolean }>;
+    publicChannels: Array<{ id?: string; protocol?: "openai" | "newapi" | "sub2api" | "ark" | "kie" | "agnes" | "minimax" | "zizidonghua"; name?: string; baseUrl?: string; models?: string[]; weight?: number; timeout?: number; enabled?: boolean; remark?: string; virtualPortraitEnabled?: boolean }>;
     syncModelConfig: boolean;
     syncStorageConfig: boolean;
     activeChannelId: string;
