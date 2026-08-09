@@ -4576,7 +4576,8 @@ async function hydrateAssistantImages(sessions: CanvasAssistantSession[]) {
         sessions.map(async (session) => ({
             ...session,
             agentState: { ...createCanvasAgentState(), ...(session.agentState || {}) },
-            protocolMessages: Array.isArray(session.protocolMessages) ? session.protocolMessages : [],
+            chatProtocolMessages: Array.isArray(session.chatProtocolMessages) ? session.chatProtocolMessages : [],
+            agentProtocolMessages: Array.isArray(session.agentProtocolMessages) ? session.agentProtocolMessages : [],
             messages: await Promise.all(
                 (session.messages || []).map(async (message) => {
                     const interrupted = message.status === "thinking" || message.status === "running";

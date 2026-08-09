@@ -4,11 +4,12 @@ import type {
     CanvasAgentContent,
     CanvasAgentProtocolMessage,
     CanvasAgentState,
+    CanvasAssistantMode,
     CanvasAssistantMessageStatus,
     CanvasAssistantReference,
 } from "../types";
 import type { CanvasAgentContext } from "./canvas-agent-context";
-import { buildCanvasAgentSkillPrompt } from "./canvas-agent-skills";
+import { buildCanvasAgentSkillPrompt, buildCanvasChatPrompt } from "./canvas-agent-skills";
 import {
     CANVAS_AGENT_TOOLS,
     canvasAgentActionLabel,
@@ -43,6 +44,7 @@ export type CanvasAgentRuntimeEvent = {
 };
 
 export type RunCanvasAgentInput = {
+    mode: CanvasAssistantMode;
     config: AiConfig;
     initialState: CanvasAgentState;
     protocolMessages: CanvasAgentProtocolMessage[];
@@ -51,6 +53,7 @@ export type RunCanvasAgentInput = {
     getContext: (state: CanvasAgentState) => CanvasAgentContext;
     executeAction: (action: CanvasAgentAction) => Promise<CanvasAgentToolResult>;
     onEvent?: (event: CanvasAgentRuntimeEvent) => void;
+    onTextDelta?: (text: string) => void;
     onCheckpoint?: (checkpoint: { state: CanvasAgentState; protocolMessages: CanvasAgentProtocolMessage[] }) => void;
     signal?: AbortSignal;
 };
@@ -73,7 +76,7 @@ export function createCanvasAgentState(): CanvasAgentState {
 
 export async function runCanvasAgent(input: RunCanvasAgentInput): Promise<RunCanvasAgentResult> {
     let state = { ...createCanvasAgentState(), ...(input.initialState || {}) };
-    let allowTools = true;
+    let allowTools = input.mode === "agent";
     let hasExecutedActions = false;
     let protocolMessages: CanvasAgentProtocolMessage[] = trimProtocolMessages([
         ...(Array.isArray(input.protocolMessages) ? input.protocolMessages : []),
@@ -82,16 +85,17 @@ export async function runCanvasAgent(input: RunCanvasAgentInput): Promise<RunCan
 
     for (let step = 0; step < MAX_AGENT_STEPS; step++) {
         throwIfAborted(input.signal);
-        input.onEvent?.({ status: "thinking", label: step ? "正在根据画布结果继续" : "正在理解画布和创作目标" });
-        const context = input.getContext(state);
+        input.onEvent?.({ status: "thinking", label: input.mode === "chat" ? "正在思考" : step ? "正在根据画布结果继续" : "正在理解画布和创作目标" });
+        const context = input.mode === "agent" ? input.getContext(state) : undefined;
         let turn;
         try {
             turn = await requestCanvasAgentTurn({
                 config: input.config,
-                systemPrompt: buildCanvasAgentSkillPrompt(state.phase, input.userText, context),
+                systemPrompt: input.mode === "chat" ? buildCanvasChatPrompt() : buildCanvasAgentSkillPrompt(state.phase, input.userText, context!),
                 messages: protocolMessages,
                 tools: CANVAS_AGENT_TOOLS,
                 allowTools,
+                onTextDelta: input.onTextDelta,
                 signal: input.signal,
             });
         } catch (error) {
@@ -101,6 +105,11 @@ export async function runCanvasAgent(input: RunCanvasAgentInput): Promise<RunCan
                 return { reply, state, protocolMessages: persistCanvasAgentProtocolMessages(protocolMessages) };
             }
             throw error;
+        }
+        if (input.mode === "chat") {
+            const reply = turn.content.trim() || "你可以继续补充想讨论的内容。";
+            protocolMessages = trimProtocolMessages([...protocolMessages, { role: "assistant" as const, content: reply }]);
+            return { reply, state, protocolMessages: persistCanvasAgentProtocolMessages(protocolMessages) };
         }
         if (turn.usedJsonFallback) allowTools = false;
 

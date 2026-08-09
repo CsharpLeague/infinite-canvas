@@ -1,13 +1,13 @@
 "use client";
 
 import { useMemo } from "react";
-import { ArrowUp, Bot, FileText, FolderOpen, ImageIcon, Menu, Music2, Square, Upload, Video, X } from "lucide-react";
+import { ArrowUp, Bot, FileText, FolderOpen, ImageIcon, Menu, MessageCircle, Music2, Sparkles, Square, Upload, Video, X } from "lucide-react";
 import { Button, Dropdown } from "antd";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useEffectiveConfig } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
-import { CanvasNodeType, type CanvasAgentConfig, type CanvasAssistantReference } from "../types";
+import { CanvasNodeType, type CanvasAgentConfig, type CanvasAssistantMode, type CanvasAssistantReference } from "../types";
 import { isCanvasImageNodeType } from "../utils/canvas-panorama";
 import { CanvasImageSettingsPopover } from "./canvas-image-settings-popover";
 import { CanvasVideoSettingsPopover } from "./canvas-video-settings-popover";
@@ -15,9 +15,11 @@ import { CanvasVideoSettingsPopover } from "./canvas-video-settings-popover";
 export type CanvasAssistantComposerProps = {
     prompt: string;
     isRunning: boolean;
+    mode: CanvasAssistantMode;
     references: CanvasAssistantReference[];
     agentConfig: CanvasAgentConfig;
     onAgentConfigChange: (patch: Partial<CanvasAgentConfig>) => void;
+    onModeChange: (mode: CanvasAssistantMode) => void;
     onPromptChange: (prompt: string) => void;
     onSubmit: () => void | Promise<void>;
     onStop?: () => void;
@@ -30,9 +32,11 @@ export type CanvasAssistantComposerProps = {
 export function CanvasAssistantComposer({
     prompt,
     isRunning,
+    mode,
     references,
     agentConfig,
     onAgentConfigChange,
+    onModeChange,
     onPromptChange,
     onSubmit,
     onStop,
@@ -72,7 +76,7 @@ export function CanvasAssistantComposer({
                     }}
                     className="thin-scrollbar h-20 w-full resize-none border-0 bg-transparent px-1 py-1 text-sm leading-5 outline-none placeholder:opacity-40"
                     style={{ color: theme.node.text }}
-                    placeholder="描述创作目标，或让我继续操作画布"
+                    placeholder={mode === "chat" ? "讨论创意、分析内容，不会操作画布" : "描述要执行的任务，Agent 可以操作画布"}
                 />
                 <div className="mt-2 flex items-center justify-between gap-2">
                     <div className="flex min-w-0 flex-1 items-center gap-1">
@@ -88,7 +92,7 @@ export function CanvasAssistantComposer({
                         >
                             <Button type="text" shape="circle" className="!h-8 !w-8 !min-w-8" style={{ color: theme.node.text }} icon={<Menu className="size-4" />} aria-label="添加素材" />
                         </Dropdown>
-                        <CanvasImageSettingsPopover
+                        {mode === "agent" ? <CanvasImageSettingsPopover
                             config={imageConfig}
                             placement="topLeft"
                             showCount={false}
@@ -98,8 +102,8 @@ export function CanvasAssistantComposer({
                                 if (key === "quality") onAgentConfigChange({ imageQuality: value });
                                 else if (key === "size") onAgentConfigChange({ imageSize: value });
                             }}
-                        />
-                        <CanvasVideoSettingsPopover
+                        /> : null}
+                        {mode === "agent" ? <CanvasVideoSettingsPopover
                             config={videoConfig}
                             placement="topLeft"
                             visualOnly
@@ -109,7 +113,7 @@ export function CanvasAssistantComposer({
                                 if (key === "vquality") onAgentConfigChange({ videoQuality: value });
                                 else if (key === "size") onAgentConfigChange({ videoSize: value });
                             }}
-                        />
+                        /> : null}
                     </div>
                     <Button
                         type="primary"
@@ -120,6 +124,33 @@ export function CanvasAssistantComposer({
                         aria-label={isRunning ? "停止" : "发送"}
                         icon={isRunning ? <Square className="size-4 fill-current" /> : <ArrowUp className="size-4" />}
                     />
+                </div>
+                <div className="mt-2 flex items-center gap-1 border-t pt-2" style={{ borderColor: theme.node.stroke }}>
+                    {([
+                        { value: "chat" as const, label: "对话", icon: MessageCircle },
+                        { value: "agent" as const, label: "Agent", icon: Sparkles },
+                    ]).map((item) => {
+                        const Icon = item.icon;
+                        const active = mode === item.value;
+                        return (
+                            <button
+                                key={item.value}
+                                type="button"
+                                disabled={isRunning}
+                                className="flex h-7 items-center gap-1.5 rounded-md px-2 text-xs transition disabled:cursor-not-allowed disabled:opacity-45"
+                                style={{ background: active ? theme.toolbar.itemHover : "transparent", color: active ? theme.node.text : theme.node.muted }}
+                                onClick={() => onModeChange(item.value)}
+                                aria-pressed={active}
+                                title={item.value === "chat" ? "只讨论，不操作画布" : "允许读取和操作画布"}
+                            >
+                                <Icon className="size-3.5" />
+                                {item.label}
+                            </button>
+                        );
+                    })}
+                    <span className="ml-1 truncate text-[11px]" style={{ color: theme.node.muted }}>
+                        {mode === "chat" ? "不会操作画布" : "可以操作画布"}
+                    </span>
                 </div>
             </div>
         </div>

@@ -76,6 +76,10 @@ export function buildCanvasAgentSkillPrompt(phase: CanvasAgentPhase, userText: s
     return skills.join("\n\n") + "\n\n【当前真实画布上下文 JSON】\n" + serializeCanvasAgentContext(context);
 }
 
+export function buildCanvasChatPrompt() {
+    return "你是创作对话助手。当前处于纯对话模式：只讨论、分析、策划和回答问题，不读取或操作画布，不调用工具，也不提交任何媒体生成任务。只有用户在消息中明确引用的素材可以作为上下文；不得声称已经读取或操作其他画布内容。用户要求实际执行时，简短说明方案并提醒切换到 Agent 模式。";
+}
+
 function buildIntentText(userText: string, context: CanvasAgentContext) {
     const selectedText = context.nodes
         .filter((node) => context.selectedNodeIds.includes(node.id))

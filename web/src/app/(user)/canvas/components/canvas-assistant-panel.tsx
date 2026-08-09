@@ -32,6 +32,7 @@ import {
     CanvasNodeType,
     type CanvasAgentConfig,
     type CanvasAgentState,
+    type CanvasAssistantMode,
     type CanvasAssistantMessage,
     type CanvasAssistantReference,
     type CanvasAssistantSession,
@@ -99,6 +100,8 @@ export function CanvasAssistantPanel({
     const consumedInitialRequestRef = useRef<typeof initialRequest>(null);
     const pendingDeleteRef = useRef<PendingDeleteConfirmation | null>(null);
     const messageListRef = useRef<HTMLDivElement>(null);
+    const streamFrameRef = useRef<number | null>(null);
+    const streamTextRef = useRef("");
     const [view, setView] = useState<"chat" | "history">("chat");
     const [prompt, setPrompt] = useState("");
     const [isRunning, setIsRunning] = useState(false);
@@ -121,6 +124,7 @@ export function CanvasAssistantPanel({
 
     useEffect(() => () => {
         abortRef.current?.abort();
+        if (streamFrameRef.current !== null) window.cancelAnimationFrame(streamFrameRef.current);
         pendingDeleteRef.current?.resolve(false);
         pendingDeleteRef.current = null;
     }, []);
@@ -210,10 +214,13 @@ export function CanvasAssistantPanel({
         cleanupImages({ sessions: [session] });
     };
 
-    const sendMessage = async (text: string, savedReferences?: CanvasAssistantReference[]) => {
-        const session = activeSession || createSession();
+    const sendMessage = async (text: string, savedReferences?: CanvasAssistantReference[], modeOverride?: CanvasAssistantMode) => {
+        const currentSession = activeSession || createSession();
+        const session = modeOverride ? { ...currentSession, mode: modeOverride } : currentSession;
         if (!activeSession) {
             commitSessions([session], session.id);
+        } else if (modeOverride && activeSession.mode !== modeOverride) {
+            updateSession(session.id, (item) => ({ ...item, mode: modeOverride, updatedAt: new Date().toISOString() }));
         }
 
         const references = savedReferences || selectedReferences;
@@ -221,7 +228,7 @@ export function CanvasAssistantPanel({
         const userMessage: CanvasAssistantMessage = { id: nanoid(), role: "user", text, references, status: "success" };
         const assistantId = nanoid();
         appendMessage(session.id, userMessage);
-        appendMessage(session.id, { id: assistantId, role: "assistant", text: "", status: "thinking", activity: "正在理解画布和创作目标" });
+        appendMessage(session.id, { id: assistantId, role: "assistant", text: "", status: "thinking", activity: session.mode === "chat" ? "正在思考" : "正在理解画布和创作目标" });
         setPrompt("");
 
         const requestConfig = {
@@ -254,9 +261,10 @@ export function CanvasAssistantPanel({
                 }),
             );
             const result = await runCanvasAgent({
+                mode: session.mode,
                 config: requestConfig,
                 initialState: session.agentState,
-                protocolMessages: session.protocolMessages,
+                protocolMessages: session.mode === "chat" ? session.chatProtocolMessages : session.agentProtocolMessages,
                 userText: text,
                 references: modelReferences,
                 getContext: getAgentContext,
@@ -273,24 +281,36 @@ export function CanvasAssistantPanel({
                 },
                 signal: controller.signal,
                 onEvent: (event) => updateMessage(session.id, assistantId, { status: event.status, activity: event.label }),
+                onTextDelta: (text) => {
+                    streamTextRef.current = text;
+                    if (streamFrameRef.current !== null) return;
+                    streamFrameRef.current = window.requestAnimationFrame(() => {
+                        streamFrameRef.current = null;
+                        updateMessage(session.id, assistantId, { text: streamTextRef.current });
+                    });
+                },
                 onCheckpoint: (checkpoint) =>
                     updateSession(session.id, (current) => ({
                         ...current,
                         agentState: checkpoint.state,
-                        protocolMessages: checkpoint.protocolMessages,
+                        ...(session.mode === "chat" ? { chatProtocolMessages: checkpoint.protocolMessages } : { agentProtocolMessages: checkpoint.protocolMessages }),
                         updatedAt: new Date().toISOString(),
                     })),
             });
+            if (streamFrameRef.current !== null) window.cancelAnimationFrame(streamFrameRef.current);
+            streamFrameRef.current = null;
             updateSession(session.id, (current) => ({
                 ...current,
                 agentState: result.state,
-                protocolMessages: result.protocolMessages,
+                ...(session.mode === "chat" ? { chatProtocolMessages: result.protocolMessages } : { agentProtocolMessages: result.protocolMessages }),
                 messages: current.messages.map((message) =>
                     message.id === assistantId ? { ...message, text: result.reply, status: "success", activity: undefined } : message,
                 ),
                 updatedAt: new Date().toISOString(),
             }));
         } catch (error) {
+            if (streamFrameRef.current !== null) window.cancelAnimationFrame(streamFrameRef.current);
+            streamFrameRef.current = null;
             const stopped = error instanceof Error && error.name === "AbortError";
             updateMessage(session.id, assistantId, {
                 text: stopped ? "已停止继续执行。已经创建的节点和已经提交的媒体任务会保留。" : error instanceof Error ? error.message : "Agent 执行失败",
@@ -307,7 +327,7 @@ export function CanvasAssistantPanel({
         if (!initialRequest || consumedInitialRequestRef.current === initialRequest) return;
         consumedInitialRequestRef.current = initialRequest;
         onInitialRequestConsumed?.();
-        void sendMessage(initialRequest.prompt, initialRequest.references);
+        void sendMessage(initialRequest.prompt, initialRequest.references, "agent");
     }, [initialRequest, onInitialRequestConsumed]);
 
     const submit = async () => {
@@ -363,7 +383,7 @@ export function CanvasAssistantPanel({
                 <div className="flex items-center justify-between border-b px-4 py-3" style={{ borderColor: theme.node.stroke }}>
                     <div className="flex items-center gap-2 text-sm font-medium">
                         <Bot className="size-4" />
-                        {view === "history" ? "历史记录" : "创作 Agent"}
+                        {view === "history" ? "历史记录" : activeSession?.mode === "agent" ? "创作 Agent" : "创作对话"}
                     </div>
                     <div className="flex items-center gap-1">
                         {view === "history" ? (
@@ -420,7 +440,7 @@ export function CanvasAssistantPanel({
                                 <Sparkles className="size-5" />
                             </div>
                             <div className="mt-4 text-base font-medium">从一个想法开始</div>
-                            <div className="mt-2 max-w-[260px] text-sm leading-6 opacity-55">描述故事、宣传片或现有素材，Agent 会与你沟通并直接操作当前画布</div>
+                            <div className="mt-2 max-w-[260px] text-sm leading-6 opacity-55">先讨论故事、宣传片或现有素材，需要执行时再切换到 Agent</div>
                         </div>
                     )}
                 </div>
@@ -442,9 +462,14 @@ export function CanvasAssistantPanel({
                         <CanvasAssistantComposer
                             prompt={prompt}
                             isRunning={isRunning}
+                            mode={activeSession?.mode || "chat"}
                             references={selectedReferences}
                             agentConfig={agentConfig}
                             onAgentConfigChange={onAgentConfigChange}
+                            onModeChange={(mode: CanvasAssistantMode) => {
+                                if (!activeSession) return;
+                                updateSession(activeSession.id, (session) => ({ ...session, mode, updatedAt: new Date().toISOString() }));
+                            }}
                             onPromptChange={setPrompt}
                             onSubmit={submit}
                             onStop={() => {
@@ -651,9 +676,11 @@ function createSession(): CanvasAssistantSession {
     return {
         id: nanoid(),
         title: "新对话",
+        mode: "chat",
         messages: [],
         agentState: createCanvasAgentState(),
-        protocolMessages: [],
+        chatProtocolMessages: [],
+        agentProtocolMessages: [],
         createdAt: now,
         updatedAt: now,
     };

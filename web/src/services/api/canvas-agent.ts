@@ -15,6 +15,7 @@ type RequestCanvasAgentTurnInput = {
     messages: CanvasAgentProtocolMessage[];
     tools: CanvasAgentToolDefinition[];
     allowTools: boolean;
+    onTextDelta?: (text: string) => void;
     signal?: AbortSignal;
 };
 
@@ -101,7 +102,7 @@ export async function requestCanvasAgentTurn(input: RequestCanvasAgentTurnInput)
 
     for (let attempt = 0; attempt < 3; attempt++) {
         try {
-            const message = await requestCompletion(requestConfig, systemPrompt, messages, tools, input.signal);
+            const message = await requestCompletion(requestConfig, systemPrompt, messages, tools, input.signal, input.onTextDelta);
             return { ...message, usedJsonFallback };
         } catch (error) {
             requestError = error;
@@ -120,7 +121,7 @@ export async function requestCanvasAgentTurn(input: RequestCanvasAgentTurnInput)
     throw requestError;
 }
 
-async function requestCompletion(config: AiConfig, systemPrompt: string, messages: CanvasAgentProtocolMessage[], tools: CanvasAgentToolDefinition[], signal?: AbortSignal) {
+async function requestCompletion(config: AiConfig, systemPrompt: string, messages: CanvasAgentProtocolMessage[], tools: CanvasAgentToolDefinition[], signal?: AbortSignal, onTextDelta?: (text: string) => void) {
     const body: Record<string, unknown> = {
         model: config.model,
         messages: [{ role: "system", content: systemPrompt }, ...messages.map(toRequestMessage)],
@@ -138,7 +139,7 @@ async function requestCompletion(config: AiConfig, systemPrompt: string, message
         signal,
     });
     const payload = response.ok && response.headers.get("Content-Type")?.toLowerCase().includes("text/event-stream")
-        ? await readCompletionStream(response)
+        ? await readCompletionStream(response, onTextDelta)
         : (await response.json().catch(() => ({}))) as ChatCompletionPayload;
     if (!response.ok || (typeof payload.code === "number" && payload.code !== 0)) {
         throw new CanvasAgentRequestError(readError(payload, response.status), response.status);
@@ -230,7 +231,7 @@ function readError(payload: ChatCompletionPayload, status: number) {
     return message || (status ? "文本模型请求失败：" + status : "文本模型请求失败");
 }
 
-async function readCompletionStream(response: Response): Promise<ChatCompletionPayload> {
+async function readCompletionStream(response: Response, onTextDelta?: (text: string) => void): Promise<ChatCompletionPayload> {
     if (!response.body) throw new CanvasAgentRequestError("文本模型没有返回可读取的流式响应", response.status);
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
@@ -245,7 +246,10 @@ async function readCompletionStream(response: Response): Promise<ChatCompletionP
         const event = JSON.parse(data) as ChatCompletionChunk;
         if (event.error?.message) throw new CanvasAgentRequestError(event.error.message, response.status);
         if (event.type === "response.completed" && event.response) completed = event.response;
-        if (event.type === "response.output_text.delta" && event.delta) content += event.delta;
+        if (event.type === "response.output_text.delta" && event.delta) {
+            content += event.delta;
+            onTextDelta?.(content);
+        }
         if (event.type === "response.output_item.done" && event.item?.type === "function_call" && event.item.name) {
             toolCalls.set(toolCalls.size, {
                 id: event.item.call_id || event.item.id,
@@ -254,7 +258,10 @@ async function readCompletionStream(response: Response): Promise<ChatCompletionP
             });
         }
         for (const choice of event.choices || []) {
-            if (choice.delta?.content) content += choice.delta.content;
+            if (choice.delta?.content) {
+                content += choice.delta.content;
+                onTextDelta?.(content);
+            }
             for (const call of choice.delta?.tool_calls || []) {
                 const index = call.index || 0;
                 const current = toolCalls.get(index) || { arguments: "" };

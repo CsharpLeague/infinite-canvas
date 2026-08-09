@@ -225,6 +225,8 @@ export type CanvasAgentProtocolMessage =
 
 export type CanvasAssistantMessageStatus = "thinking" | "running" | "waiting" | "success" | "error";
 
+export type CanvasAssistantMode = "chat" | "agent";
+
 export type CanvasAssistantMessage = {
     id: string;
     role: "user" | "assistant";
@@ -238,9 +240,11 @@ export type CanvasAssistantMessage = {
 export type CanvasAssistantSession = {
     id: string;
     title: string;
+    mode: CanvasAssistantMode;
     messages: CanvasAssistantMessage[];
     agentState: CanvasAgentState;
-    protocolMessages: CanvasAgentProtocolMessage[];
+    chatProtocolMessages: CanvasAgentProtocolMessage[];
+    agentProtocolMessages: CanvasAgentProtocolMessage[];
     createdAt: string;
     updatedAt: string;
 };
