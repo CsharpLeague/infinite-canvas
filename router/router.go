@@ -107,6 +107,18 @@ func New() *gin.Engine {
 	v1.POST("/user-data/assets", gin.WrapF(handler.SaveUserAssetData))
 	api.GET("/proxy-image", gin.WrapF(handler.ProxyImage))
 	api.GET("/prompts", middleware.OptionalAuth, gin.WrapF(handler.Prompts))
+	api.GET("/canvas-skills", middleware.OptionalAuth, gin.WrapF(handler.CanvasSkills))
+	api.POST("/canvas-agent/runs", middleware.UserAuth, gin.WrapF(handler.CreateCanvasAgentRun))
+	api.GET("/canvas-agent/runs/active", middleware.UserAuth, gin.WrapF(handler.RecoverCanvasAgentRun))
+	api.POST("/canvas-agent/runs/:id/tool-results", middleware.UserAuth, func(c *gin.Context) {
+		handler.SubmitCanvasAgentToolResults(c.Writer, c.Request, c.Param("id"))
+	})
+	api.POST("/canvas-agent/runs/:id/cancel", middleware.UserAuth, func(c *gin.Context) {
+		handler.CancelCanvasAgentRun(c.Writer, c.Request, c.Param("id"))
+	})
+	api.GET("/canvas-agent/runs/:id/events", middleware.UserAuth, func(c *gin.Context) {
+		handler.CanvasAgentRunEvents(c.Writer, c.Request, c.Param("id"))
+	})
 	api.GET("/assets", middleware.OptionalAuth, gin.WrapF(handler.Assets))
 	api.POST("/admin/login", gin.WrapF(handler.AdminLogin))
 
@@ -139,6 +151,12 @@ func New() *gin.Engine {
 	admin.POST("/prompts/batch-delete", gin.WrapF(handler.AdminDeletePrompts))
 	admin.DELETE("/prompts/:id", func(c *gin.Context) {
 		handler.AdminDeletePrompt(c.Writer, c.Request, c.Param("id"))
+	})
+	admin.GET("/canvas-skills", gin.WrapF(handler.AdminCanvasSkills))
+	admin.POST("/canvas-skills", gin.WrapF(handler.AdminSaveCanvasSkill))
+	admin.POST("/canvas-skills/import", gin.WrapF(handler.AdminImportCanvasSkill))
+	admin.DELETE("/canvas-skills/:id", func(c *gin.Context) {
+		handler.AdminDeleteCanvasSkill(c.Writer, c.Request, c.Param("id"))
 	})
 	admin.GET("/assets", gin.WrapF(handler.AdminAssets))
 	admin.POST("/assets", gin.WrapF(handler.AdminSaveAsset))

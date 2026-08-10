@@ -361,3 +361,62 @@ description: 当前后端主要数据表与字段说明
 ### virtual_portrait_tasks
 
 保存火山方舟虚拟人像素材的异步入库状态。`user_id + channel_id + source_fingerprint` 唯一，防止同一用户把同一图片重复提交到同一火山渠道。`asset_id` 可用后以 `asset://<asset_id>` 形式传给 Seedance 视频接口。删除已入库素材时，后端先通过 AK/SK 签名调用火山 `DeleteAsset`，成功后再删除本地任务记录。MySQL 增量建表脚本见 `docs/deployment/mysql-virtual-portraits.sql`。
+### canvas_skills
+
+画布 Agent 可选 Skill 的发布配置。前端只通过公开列表读取展示信息，发送 Agent 请求时再按 ID 获取已发布的运行指令和工具白名单；Skill 配置不包含可执行脚本。
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `id` | string | 主键 |
+| `slug` | string | 唯一标识 |
+| `name` | string | 展示名称 |
+| `description` | string | 选择器简介 |
+| `category` | string | 选择器分组 |
+| `icon` | string | 图标标识或地址 |
+| `placeholder` | string | 选中后的输入提示 |
+| `instructions` | text | 注入 Agent 的运行指令 |
+| `files` | json/text | 从 ZIP Skill Package 保留的 `SKILL.md` 与 `references/` 文本文件 |
+| `allowed_tools` | json | 允许调用的画布工具名白名单 |
+| `status` | string | `draft` 或 `published` |
+| `sort` | number | 展示顺序 |
+| `created_at` | string | 创建时间 |
+| `updated_at` | string | 更新时间 |
+
+### canvas_agent_runs
+
+记录一次由服务端持有的画布 Agent 执行。服务端负责加载 Skill、维护模型协议历史、调用模型、限制步骤，并在需要画布操作时暂停等待浏览器返回工具结果。
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `id` | string | Run ID |
+| `owner_id` | string | 登录用户 ID，匿名使用时为空 |
+| `token_hash` | string | Run 级访问凭证的 SHA-256 哈希；明文只在创建响应中返回，不落库 |
+| `session_id` | string | 前端对话会话 ID |
+| `canvas_id` | string | 画布 ID，可为空 |
+| `skill_id` | string | 本次明确选择的 Skill ID，可为空 |
+| `model` | string | 文本模型 |
+| `channel_id` | string | 服务端渠道 ID |
+| `user_channel_id` | string | 用户保存的本地渠道 ID |
+| `status` | string | `running`、`waiting_tool`、`completed`、`failed` 或 `cancelled` |
+| `phase` | string | Skill 当前阶段 |
+| `step` / `max_steps` | int | 已执行模型轮数与安全上限 |
+| `input` | json/text | 本次运行的精简画布上下文 |
+| `protocol` | json/text | 服务端持有的模型协议消息 |
+| `tools` | json/text | 经 Skill 白名单过滤后的工具定义 |
+| `pending_tool_calls` | json/text | 等待浏览器执行的工具调用 |
+| `output` | json/text | 最终输出摘要 |
+| `error` | text | 失败原因 |
+| `created_at` | string | 创建时间 |
+| `updated_at` | string | 更新时间 |
+
+### canvas_agent_events
+
+Run 的追加式事件流。自增 `id` 同时作为 SSE 事件 ID，客户端可通过 `Last-Event-ID` 或 `after` 参数断线续传。业务事件包括 `run.created`、`run.status`、`text.delta`、`text.completed`、`tool.requested`、`tool.result.accepted` 与三种终态事件。
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `id` | uint64 | 全局递增事件 ID |
+| `run_id` | string | 关联 Run ID |
+| `type` | string | 业务事件类型，如 `run.created`、`run.completed` |
+| `data` | json/text | 事件载荷 |
+| `created_at` | string | 创建时间 |

@@ -4,6 +4,7 @@ import { type CSSProperties, useEffect, useMemo, useRef, useState } from "react"
 import {
     History,
     Bot,
+    ChevronRight,
     PanelRightClose,
     Plus,
     RotateCcw,
@@ -23,6 +24,8 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import { cn } from "@/lib/utils";
 import { imageToDataUrl } from "@/services/image-storage";
 import { useAssetStore } from "@/stores/use-asset-store";
+import { fetchCanvasSkills } from "@/services/api/canvas-skills";
+import { useQuery } from "@tanstack/react-query";
 import { useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { createCanvasAgentState, runCanvasAgent } from "../agent/canvas-agent-runtime";
@@ -96,12 +99,14 @@ export function CanvasAssistantPanel({
     const effectiveConfig = useEffectiveConfig();
     const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
     const cleanupImages = useAssetStore((state) => state.cleanupImages);
+    const skillsQuery = useQuery({ queryKey: ["canvas-skills"], queryFn: fetchCanvasSkills, staleTime: 5 * 60 * 1000 });
     const abortRef = useRef<AbortController | null>(null);
     const consumedInitialRequestRef = useRef<typeof initialRequest>(null);
     const pendingDeleteRef = useRef<PendingDeleteConfirmation | null>(null);
     const messageListRef = useRef<HTMLDivElement>(null);
     const streamFrameRef = useRef<number | null>(null);
     const streamTextRef = useRef("");
+    const resumedRunIdsRef = useRef(new Set<string>());
     const [view, setView] = useState<"chat" | "history">("chat");
     const [prompt, setPrompt] = useState("");
     const [isRunning, setIsRunning] = useState(false);
@@ -111,6 +116,7 @@ export function CanvasAssistantPanel({
     const [resizing, setResizing] = useState(false);
     const [removedReferenceIds, setRemovedReferenceIds] = useState<Set<string>>(new Set());
     const [pendingDelete, setPendingDelete] = useState<PendingDeleteConfirmation | null>(null);
+    const [streamingText, setStreamingText] = useState<Record<string, string>>({});
     const [initialSession] = useState(createSession);
     const safeSessions = sessions.length ? sessions : [initialSession];
     const resolvedActiveSessionId = activeSessionId && safeSessions.some((session) => session.id === activeSessionId) ? activeSessionId : safeSessions[0]?.id || null;
@@ -132,6 +138,10 @@ export function CanvasAssistantPanel({
     const activeSession = safeSessions.find((session) => session.id === resolvedActiveSessionId) || safeSessions[0] || null;
     const historySessions = safeSessions.filter((session) => session.messages.length > 0);
     const messages = activeSession?.messages || [];
+    const displayMessages = useMemo(
+        () => messages.map((message) => streamingText[message.id] === undefined ? message : { ...message, text: streamingText[message.id] }),
+        [messages, streamingText],
+    );
     const hasMessages = messages.length > 0;
     const selectedNodeKey = useMemo(() => Array.from(selectedNodeIds).sort().join(","), [selectedNodeIds]);
 
@@ -214,7 +224,7 @@ export function CanvasAssistantPanel({
         cleanupImages({ sessions: [session] });
     };
 
-    const sendMessage = async (text: string, savedReferences?: CanvasAssistantReference[], modeOverride?: CanvasAssistantMode) => {
+    const sendMessage = async (text: string, savedReferences?: CanvasAssistantReference[], modeOverride?: CanvasAssistantMode, existingRun?: CanvasAssistantSession["activeRun"]) => {
         const currentSession = activeSession || createSession();
         const session = modeOverride ? { ...currentSession, mode: modeOverride } : currentSession;
         if (!activeSession) {
@@ -225,11 +235,15 @@ export function CanvasAssistantPanel({
 
         const references = savedReferences || selectedReferences;
         const messageReferenceNodeIds = references.map((reference) => reference.id);
-        const userMessage: CanvasAssistantMessage = { id: nanoid(), role: "user", text, references, status: "success" };
-        const assistantId = nanoid();
-        appendMessage(session.id, userMessage);
-        appendMessage(session.id, { id: assistantId, role: "assistant", text: "", status: "thinking", activity: session.mode === "chat" ? "正在思考" : "正在理解画布和创作目标" });
-        setPrompt("");
+        const resumableAssistant = existingRun ? [...session.messages].reverse().find((message) => message.role === "assistant" && message.status !== "success" && message.status !== "error") : undefined;
+        const assistantId = resumableAssistant?.id || nanoid();
+        if (!existingRun) {
+            appendMessage(session.id, { id: nanoid(), role: "user", text, references, status: "success" });
+            appendMessage(session.id, { id: assistantId, role: "assistant", text: "", status: "thinking", activity: session.mode === "chat" ? "正在思考" : "正在理解画布和创作目标" });
+            setPrompt("");
+        } else if (!resumableAssistant) {
+            appendMessage(session.id, { id: assistantId, role: "assistant", text: "", status: "thinking", activity: "正在恢复 Agent 运行" });
+        }
 
         const requestConfig = {
             ...effectiveConfig,
@@ -261,6 +275,14 @@ export function CanvasAssistantPanel({
                 }),
             );
             const result = await runCanvasAgent({
+                sessionId: session.id,
+                skillId: session.skillId,
+                existingRun,
+                toolResults: session.toolResults,
+                toolExecutions: session.toolExecutions,
+                onRunChange: (run) => updateSession(session.id, (current) => ({ ...current, activeRun: run, updatedAt: new Date().toISOString() })),
+                onToolStart: (callId) => updateSession(session.id, (current) => ({ ...current, toolExecutions: { ...current.toolExecutions, [callId]: { status: "started" } }, updatedAt: new Date().toISOString() })),
+                onToolResult: (callId, result) => updateSession(session.id, (current) => ({ ...current, toolResults: { ...current.toolResults, [callId]: result }, toolExecutions: { ...current.toolExecutions, [callId]: { status: "completed", result } }, updatedAt: new Date().toISOString() })),
                 mode: session.mode,
                 config: requestConfig,
                 initialState: session.agentState,
@@ -286,7 +308,7 @@ export function CanvasAssistantPanel({
                     if (streamFrameRef.current !== null) return;
                     streamFrameRef.current = window.requestAnimationFrame(() => {
                         streamFrameRef.current = null;
-                        updateMessage(session.id, assistantId, { text: streamTextRef.current });
+                        setStreamingText((current) => ({ ...current, [assistantId]: streamTextRef.current }));
                     });
                 },
                 onCheckpoint: (checkpoint) =>
@@ -299,6 +321,11 @@ export function CanvasAssistantPanel({
             });
             if (streamFrameRef.current !== null) window.cancelAnimationFrame(streamFrameRef.current);
             streamFrameRef.current = null;
+            setStreamingText((current) => {
+                const next = { ...current };
+                delete next[assistantId];
+                return next;
+            });
             updateSession(session.id, (current) => ({
                 ...current,
                 agentState: result.state,
@@ -311,6 +338,11 @@ export function CanvasAssistantPanel({
         } catch (error) {
             if (streamFrameRef.current !== null) window.cancelAnimationFrame(streamFrameRef.current);
             streamFrameRef.current = null;
+            setStreamingText((current) => {
+                const next = { ...current };
+                delete next[assistantId];
+                return next;
+            });
             const stopped = error instanceof Error && error.name === "AbortError";
             updateMessage(session.id, assistantId, {
                 text: stopped ? "已停止继续执行。已经创建的节点和已经提交的媒体任务会保留。" : error instanceof Error ? error.message : "Agent 执行失败",
@@ -330,9 +362,20 @@ export function CanvasAssistantPanel({
         void sendMessage(initialRequest.prompt, initialRequest.references, "agent");
     }, [initialRequest, onInitialRequestConsumed]);
 
+    useEffect(() => {
+        const run = activeSession?.activeRun;
+        if (!run || isRunning || resumedRunIdsRef.current.has(run.id)) return;
+        resumedRunIdsRef.current.add(run.id);
+        void sendMessage("", [], "agent", run);
+    }, [activeSession?.activeRun?.id, isRunning]);
+
     const submit = async () => {
         const text = prompt.trim();
         if (!text || isRunning) return;
+        if (activeSession?.activeRun) {
+            await sendMessage("", [], "agent", activeSession.activeRun);
+            return;
+        }
         await sendMessage(text);
     };
 
@@ -433,7 +476,7 @@ export function CanvasAssistantPanel({
                             onDelete={(id) => setDeleteChatIds([id])}
                         />
                     ) : messages.length ? (
-                        <AssistantMessages messages={messages} onRetry={retryMessage} />
+                        <AssistantMessages messages={displayMessages} onRetry={retryMessage} onSelect={(text) => void sendMessage(text)} />
                     ) : (
                         <div className="flex h-full flex-col items-center justify-center px-8 text-center">
                             <div className="grid size-12 place-items-center rounded-2xl" style={{ background: theme.node.fill }}>
@@ -465,7 +508,13 @@ export function CanvasAssistantPanel({
                             mode={activeSession?.mode || "chat"}
                             references={selectedReferences}
                             agentConfig={agentConfig}
+                            skills={skillsQuery.data || []}
+                            selectedSkillId={activeSession?.skillId}
                             onAgentConfigChange={onAgentConfigChange}
+                            onSkillChange={(skillId) => {
+                                if (!activeSession) return;
+                                updateSession(activeSession.id, (session) => ({ ...session, skillId, updatedAt: new Date().toISOString() }));
+                            }}
                             onModeChange={(mode: CanvasAssistantMode) => {
                                 if (!activeSession) return;
                                 updateSession(activeSession.id, (session) => ({ ...session, mode, updatedAt: new Date().toISOString() }));
@@ -553,7 +602,96 @@ function AssistantMarkdown({ children }: { children: string }) {
     );
 }
 
-function AssistantMessages({ messages, onRetry }: { messages: CanvasAssistantMessage[]; onRetry: (message: CanvasAssistantMessage) => void }) {
+type StoryOption = { label?: string; title?: string; desc?: string; tags?: string[]; user_input?: string };
+type StorySegment = { age?: string; pov_anchor?: string; core_action?: string; emotional_keyword?: string; prop_state?: string; env_sound?: string; relationship_change?: string; estimated_duration?: number };
+type StoryOutline = { title?: string; narrative_summary?: string; segments?: StorySegment[]; ending_recovery_point?: string };
+
+function AssistantStructuredContent({ text, onSelect }: { text: string; onSelect: (text: string) => void }) {
+    const theme = canvasThemes[useThemeStore((state) => state.theme)];
+    const blocks = useMemo(() => {
+        const result: Array<{ text?: string; value?: unknown }> = [];
+        const pattern = /```(?:json)?\s*([\s\S]*?)```/gi;
+        let cursor = 0;
+        for (const match of text.matchAll(pattern)) {
+            const index = match.index || 0;
+            if (index > cursor) result.push({ text: text.slice(cursor, index) });
+            try {
+                result.push({ value: JSON.parse(match[1].trim()) });
+            } catch {
+                result.push({ text: match[0] });
+            }
+            cursor = index + match[0].length;
+        }
+        if (cursor < text.length) result.push({ text: text.slice(cursor) });
+        return result.length ? result : [{ text }];
+    }, [text]);
+
+    return (
+        <div className="space-y-3">
+            {blocks.map((block, index) => {
+                if (block.text !== undefined) return block.text.trim() ? <AssistantMarkdown key={index}>{block.text}</AssistantMarkdown> : null;
+                if (Array.isArray(block.value) && block.value.every((item) => item && typeof item === "object" && "title" in item)) {
+                    return (
+                        <div key={index} className="grid gap-2.5">
+                            {(block.value as StoryOption[]).map((option, optionIndex) => (
+                                <button
+                                    key={`${option.label || optionIndex}-${option.title || "option"}`}
+                                    type="button"
+                                    className="group w-full rounded-xl border p-3 text-left transition hover:-translate-y-0.5"
+                                    style={{ borderColor: theme.node.stroke, background: theme.toolbar.itemHover }}
+                                    onClick={() => option.user_input && onSelect(option.user_input)}
+                                    disabled={!option.user_input}
+                                >
+                                    <div className="flex items-start gap-3">
+                                        <span className="mt-0.5 text-[11px] font-semibold tracking-wide opacity-45">{option.label || `方案${optionIndex + 1}`}</span>
+                                        <div className="min-w-0 flex-1">
+                                            <div className="flex items-center justify-between gap-2">
+                                                <span className="font-semibold">{option.title || "未命名方案"}</span>
+                                                <ChevronRight className="size-4 opacity-30 transition group-hover:translate-x-0.5 group-hover:opacity-70" />
+                                            </div>
+                                            {option.desc ? <p className="mt-1.5 text-[13px] leading-5 opacity-70">{option.desc}</p> : null}
+                                            {option.tags?.length ? <div className="mt-2 flex flex-wrap gap-1.5">{option.tags.map((tag) => <span key={tag} className="rounded-md border px-1.5 py-0.5 text-[11px] opacity-55" style={{ borderColor: theme.node.stroke }}>{tag}</span>)}</div> : null}
+                                        </div>
+                                    </div>
+                                </button>
+                            ))}
+                        </div>
+                    );
+                }
+                const outline = block.value as StoryOutline;
+                if (outline && typeof outline === "object" && Array.isArray(outline.segments)) {
+                    return (
+                        <div key={index} className="overflow-hidden rounded-xl border" style={{ borderColor: theme.node.stroke }}>
+                            <div className="p-3" style={{ background: theme.toolbar.itemHover }}>
+                                <div className="font-semibold">{outline.title || "故事大纲"}</div>
+                                {outline.narrative_summary ? <p className="mt-1 text-[13px] leading-5 opacity-65">{outline.narrative_summary}</p> : null}
+                            </div>
+                            <div className="divide-y" style={{ borderColor: theme.node.stroke }}>
+                                {outline.segments.map((segment, segmentIndex) => (
+                                    <div key={segmentIndex} className="grid grid-cols-[48px_1fr] gap-3 p-3">
+                                        <div className="text-xs font-semibold opacity-45">{segment.age || `阶段${segmentIndex + 1}`}</div>
+                                        <div className="min-w-0 space-y-1 text-[13px] leading-5">
+                                            {segment.core_action ? <div>{segment.core_action}</div> : null}
+                                            {segment.pov_anchor ? <div className="opacity-60">画面：{segment.pov_anchor}</div> : null}
+                                            <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs opacity-50">
+                                                {segment.emotional_keyword ? <span>情绪 · {segment.emotional_keyword}</span> : null}
+                                                {segment.estimated_duration ? <span>{segment.estimated_duration} 秒</span> : null}
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                            {outline.ending_recovery_point ? <div className="border-t p-3 text-[13px] leading-5 opacity-65" style={{ borderColor: theme.node.stroke }}>结尾回收：{outline.ending_recovery_point}</div> : null}
+                        </div>
+                    );
+                }
+                return <AssistantMarkdown key={index}>{`\`\`\`json\n${JSON.stringify(block.value, null, 2)}\n\`\`\``}</AssistantMarkdown>;
+            })}
+        </div>
+    );
+}
+
+function AssistantMessages({ messages, onRetry, onSelect }: { messages: CanvasAssistantMessage[]; onRetry: (message: CanvasAssistantMessage) => void; onSelect: (text: string) => void }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
 
     return (
@@ -579,11 +717,11 @@ function AssistantMessages({ messages, onRetry }: { messages: CanvasAssistantMes
                                         Agent
                                     </div>
                                 ) : null}
-                                {message.role === "assistant" ? <AssistantMarkdown>{message.text}</AssistantMarkdown> : message.text}
+                                {message.role === "assistant" ? <AssistantStructuredContent text={message.text} onSelect={onSelect} /> : message.text}
                             </div>
                         ) : null}
                         {message.references?.length ? <MessageReferences message={message} /> : null}
-                        {running ? <ImageGenerationPending compact label={message.activity || "正在执行"} className="w-[250px] rounded-2xl border" /> : null}
+                        {running ? <ImageGenerationPending compact label="正在思考" /> : null}
                         {message.role === "assistant" && !running && message.text ? (
                             <Button shape="circle" size="small" style={{ borderColor: theme.node.stroke }} icon={<RotateCcw className="size-3.5" />} onClick={() => onRetry(message)} title="重试" />
                         ) : null}

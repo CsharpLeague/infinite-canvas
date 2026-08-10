@@ -74,6 +74,7 @@ type ChatCompletionChunk = {
     item?: ResponsesOutputItem;
     response?: ChatCompletionPayload;
     error?: { message?: string };
+    rate_limits?: { allowed?: boolean; limit_reached?: boolean; reset_after_seconds?: number };
 };
 
 class CanvasAgentRequestError extends Error {
@@ -245,6 +246,11 @@ async function readCompletionStream(response: Response, onTextDelta?: (text: str
         if (!data || data === "[DONE]") return;
         const event = JSON.parse(data) as ChatCompletionChunk;
         if (event.error?.message) throw new CanvasAgentRequestError(event.error.message, response.status);
+        if (event.type === "codex.rate_limits" && (event.rate_limits?.allowed === false || event.rate_limits?.limit_reached)) {
+            const seconds = event.rate_limits.reset_after_seconds;
+            const reset = typeof seconds === "number" ? `，预计 ${formatResetDuration(seconds)} 后恢复` : "";
+            throw new CanvasAgentRequestError("当前模型渠道额度已用完" + reset + "，请更换文本模型或渠道。", 429);
+        }
         if (event.type === "response.completed" && event.response) completed = event.response;
         if (event.type === "response.output_text.delta" && event.delta) {
             content += event.delta;
@@ -295,6 +301,13 @@ async function readCompletionStream(response: Response, onTextDelta?: (text: str
             },
         }],
     };
+}
+
+function formatResetDuration(seconds: number) {
+    if (seconds < 60) return Math.max(1, Math.ceil(seconds)) + " 秒";
+    if (seconds < 3600) return Math.ceil(seconds / 60) + " 分钟";
+    if (seconds < 86400) return Math.ceil(seconds / 3600) + " 小时";
+    return Math.ceil(seconds / 86400) + " 天";
 }
 
 function hasImageContent(messages: CanvasAgentProtocolMessage[]) {

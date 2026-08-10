@@ -34,6 +34,7 @@ export type CanvasAgentAction = {
     id: string;
     name: CanvasAgentActionName;
     arguments: Record<string, unknown>;
+    recovery?: boolean;
 };
 
 export type CanvasAgentToolResult = {
@@ -152,7 +153,6 @@ export const CANVAS_AGENT_TOOLS: CanvasAgentToolDefinition[] = [
             sourceNodeIds: STRING_ARRAY,
             size: STRING,
             seconds: { type: "number", minimum: -1, maximum: 30 },
-            generateAudio: { type: "boolean" },
         },
         ["prompt", "sourceNodeIds"],
     ),
@@ -263,7 +263,6 @@ export function normalizeCanvasAgentAction(name: unknown, args: unknown, id = na
                 ...(optionalString(input.title) ? { title: optionalString(input.title) } : {}),
                 ...(optionalString(input.size) ? { size: optionalString(input.size) } : {}),
                 ...(boundedNumber(input.seconds, -1, 30) !== undefined ? { seconds: boundedNumber(input.seconds, -1, 30) } : {}),
-                ...(typeof input.generateAudio === "boolean" ? { generateAudio: input.generateAudio } : {}),
             };
             break;
         }

@@ -3030,6 +3030,10 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                 connectionsRef.current = nextConnections;
                 setConnections(nextConnections);
             };
+            const existingCallNode = nodesRef.current.find((node) => node.metadata?.agentCallId === action.id);
+            if (existingCallNode) return { ok: true, nodeId: existingCallNode.id, recovered: true, node: canvasAgentNodeSummary(existingCallNode), ...canvasAgentTaskSummary(existingCallNode) };
+            const existingCallConnection = connectionsRef.current.find((connection) => connection.agentCallId === action.id);
+            if (existingCallConnection) return { ok: true, connectionId: existingCallConnection.id, recovered: true };
             const nextNodeCenter = (type: CanvasNodeType, sourceNodes: CanvasNodeData[], sizeOverride?: { width: number; height: number }) => {
                 const spec = sizeOverride ? { ...getNodeSpec(type), ...sizeOverride } : getNodeSpec(type);
                 const gapX = 72;
@@ -3165,6 +3169,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                     const nodeSize = action.name === "create_primary_script_node" ? AGENT_PRIMARY_SCRIPT_NODE_SIZE : undefined;
                     const nodeCenter = nextNodeCenter(CanvasNodeType.Text, sourceNodes, nodeSize);
                     const node = createCanvasNode(CanvasNodeType.Text, nodeCenter, {
+                        agentCallId: action.id,
                         content,
                         prompt: content,
                         status: NODE_STATUS_SUCCESS,
@@ -3216,7 +3221,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
 
                 if (action.name === "delete_node") {
                     const nodeId = stringValue("nodeId");
-                    if (!getNode(nodeId)) return missingNodeResult(nodeId);
+                    if (!getNode(nodeId)) return action.recovery ? { ok: true, deletedNodeIds: [nodeId], recovered: true } : missingNodeResult(nodeId);
                     const beforeNodeIds = nodesRef.current.map((node) => node.id);
                     deleteNodes(new Set([nodeId]));
                     const remainingNodeIds = new Set(nodesRef.current.map((node) => node.id));
@@ -3236,7 +3241,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                     }
                     const existing = connectionsRef.current.find((connection) => connection.fromNodeId === fromNodeId && connection.toNodeId === toNodeId);
                     if (existing) return { ok: true, connectionId: existing.id, alreadyExists: true };
-                    const connection = { id: nanoid(), fromNodeId, toNodeId };
+                    const connection = { id: nanoid(), fromNodeId, toNodeId, agentCallId: action.id };
                     commitConnections([...connectionsRef.current, connection]);
                     return { ok: true, connectionId: connection.id };
                 }
@@ -3244,7 +3249,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                 if (action.name === "delete_connection") {
                     const connectionId = stringValue("connectionId");
                     if (!connectionsRef.current.some((connection) => connection.id === connectionId)) {
-                        return { ok: false, code: "connection_not_found", message: "找不到连线 " + connectionId };
+                        return action.recovery ? { ok: true, deletedConnectionId: connectionId, recovered: true } : { ok: false, code: "connection_not_found", message: "找不到连线 " + connectionId };
                     }
                     deleteConnection(connectionId);
                     return { ok: true, deletedConnectionId: connectionId };
@@ -3254,12 +3259,18 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                     const nodeIds = stringValues("nodeIds");
                     const missingNodeId = validateNodeIds(nodeIds);
                     if (missingNodeId) return missingNodeResult(missingNodeId);
+                    if (action.recovery) {
+                        const groupIds = [...new Set(nodeIds.map((nodeId) => getNode(nodeId)?.metadata?.groupId).filter((value): value is string => Boolean(value)))];
+                        if (groupIds.length === 1 && nodeIds.every((nodeId) => getNode(nodeId)?.metadata?.groupId === groupIds[0])) return { ok: true, groupId: groupIds[0], nodeIds, recovered: true };
+                    }
                     const groupId = createGroupFromSelection(nodeIds);
                     if (!groupId) return { ok: false, code: "invalid_group", message: "分组至少需要两个未分组的普通节点" };
                     const title = stringValue("title");
                     if (title) {
-                        const nextNodes = nodesRef.current.map((node) => (node.id === groupId ? { ...node, title } : node));
+                        const nextNodes = nodesRef.current.map((node) => (node.id === groupId ? { ...node, title, metadata: { ...node.metadata, agentCallId: action.id } } : node));
                         commitNodes(nextNodes);
+                    } else {
+                        commitNodes(nodesRef.current.map((node) => (node.id === groupId ? { ...node, metadata: { ...node.metadata, agentCallId: action.id } } : node)));
                     }
                     return { ok: true, groupId, nodeIds };
                 }
@@ -3324,6 +3335,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
 
                     const prompt = stringValue("prompt");
                     const metadata: CanvasNodeMetadata = {
+                        agentCallId: action.id,
                         prompt,
                         excludeUpstreamText: true,
                         status: "idle",
@@ -3340,7 +3352,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                         const seconds = typeof args.seconds === "number" ? args.seconds : Number(generationConfig.videoSeconds);
                         const durationError = validateCanvasAgentVideoSeconds(generationConfig.model, seconds);
                         if (durationError) return { ok: false, code: "unsupported_duration", message: durationError, supported: canvasAgentVideoDurationHint(generationConfig.model) };
-                        const generateAudio = typeof args.generateAudio === "boolean" ? args.generateAudio : generationConfig.videoGenerateAudio === "true";
+                        const generateAudio = generationConfig.videoGenerateAudio === "true";
                         if (generateAudio && !supportsVideoAudioGeneration(generationConfig.model)) {
                             return { ok: false, code: "video_audio_not_supported", message: "当前全局视频模型不支持视频原生声音" };
                         }

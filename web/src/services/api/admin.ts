@@ -1,4 +1,4 @@
-import { apiDelete, apiGet, apiPost, compactApiParams } from "@/services/api/request";
+import { apiDelete, apiGet, apiPost, apiPostForm, compactApiParams } from "@/services/api/request";
 import type { Prompt, PromptListResponse } from "@/services/api/prompts";
 
 export type AdminPromptCategory = {
@@ -9,6 +9,46 @@ export type AdminPromptCategory = {
     githubUrl: string;
     remote: boolean;
 };
+
+export type AdminCanvasSkill = {
+    id: string;
+    slug: string;
+    name: string;
+    description: string;
+    category: string;
+    icon: string;
+    placeholder: string;
+    instructions: string;
+    files: Record<string, string>;
+    allowedTools: string[];
+    status: "draft" | "published";
+    sort: number;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type AdminCanvasSkillList = {
+    items: AdminCanvasSkill[];
+    total: number;
+};
+
+export function fetchAdminCanvasSkills(token: string, keyword = "") {
+    return apiGet<AdminCanvasSkillList>("/api/admin/canvas-skills", compactApiParams({ keyword, page: 1, pageSize: 100 }), token);
+}
+
+export function saveAdminCanvasSkill(token: string, skill: Partial<AdminCanvasSkill>) {
+    return apiPost<AdminCanvasSkill>("/api/admin/canvas-skills", skill, token);
+}
+
+export function deleteAdminCanvasSkill(token: string, id: string) {
+    return apiDelete<boolean>(`/api/admin/canvas-skills/${encodeURIComponent(id)}`, token);
+}
+
+export function importAdminCanvasSkill(token: string, file: File) {
+    const body = new FormData();
+    body.append("file", file);
+    return apiPostForm<AdminCanvasSkill>("/api/admin/canvas-skills/import", body, token);
+}
 
 export type AdminUser = {
     id: string;

@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo } from "react";
-import { ArrowUp, Bot, FileText, FolderOpen, ImageIcon, Menu, MessageCircle, Music2, Sparkles, Square, Upload, Video, X } from "lucide-react";
-import { Button, Dropdown } from "antd";
+import { useMemo, useState } from "react";
+import { ArrowUp, Bot, ChevronDown, FileText, FolderOpen, ImageIcon, Menu, MessageCircle, Music2, Sparkles, Square, Upload, Video, X } from "lucide-react";
+import { Button, Dropdown, Popover } from "antd";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useEffectiveConfig } from "@/stores/use-config-store";
@@ -11,6 +11,7 @@ import { CanvasNodeType, type CanvasAgentConfig, type CanvasAssistantMode, type 
 import { isCanvasImageNodeType } from "../utils/canvas-panorama";
 import { CanvasImageSettingsPopover } from "./canvas-image-settings-popover";
 import { CanvasVideoSettingsPopover } from "./canvas-video-settings-popover";
+import type { CanvasSkillSummary } from "@/services/api/canvas-skills";
 
 export type CanvasAssistantComposerProps = {
     prompt: string;
@@ -18,7 +19,10 @@ export type CanvasAssistantComposerProps = {
     mode: CanvasAssistantMode;
     references: CanvasAssistantReference[];
     agentConfig: CanvasAgentConfig;
+    skills?: CanvasSkillSummary[];
+    selectedSkillId?: string;
     onAgentConfigChange: (patch: Partial<CanvasAgentConfig>) => void;
+    onSkillChange?: (skillId?: string) => void;
     onModeChange: (mode: CanvasAssistantMode) => void;
     onPromptChange: (prompt: string) => void;
     onSubmit: () => void | Promise<void>;
@@ -35,7 +39,10 @@ export function CanvasAssistantComposer({
     mode,
     references,
     agentConfig,
+    skills = [],
+    selectedSkillId,
     onAgentConfigChange,
+    onSkillChange,
     onModeChange,
     onPromptChange,
     onSubmit,
@@ -49,6 +56,9 @@ export function CanvasAssistantComposer({
     const effectiveConfig = useEffectiveConfig();
     const imageConfig = useMemo(() => ({ ...effectiveConfig, quality: agentConfig.imageQuality, size: agentConfig.imageSize }), [agentConfig.imageQuality, agentConfig.imageSize, effectiveConfig]);
     const videoConfig = useMemo(() => ({ ...effectiveConfig, vquality: agentConfig.videoQuality, size: agentConfig.videoSize }), [agentConfig.videoQuality, agentConfig.videoSize, effectiveConfig]);
+    const [skillOpen, setSkillOpen] = useState(false);
+    const selectedSkill = skills.find((item) => item.id === selectedSkillId);
+    const skillGroups = useMemo(() => Array.from(new Set(skills.map((item) => item.category || "通用"))).map((category) => ({ category, items: skills.filter((item) => (item.category || "通用") === category) })), [skills]);
 
     return (
         <div className="px-2 pb-2" onWheelCapture={(event) => event.stopPropagation()}>
@@ -60,6 +70,33 @@ export function CanvasAssistantComposer({
                 </div>
             ) : null}
             <div className="rounded-2xl border px-3 pb-3 pt-3" style={{ background: theme.toolbar.panel, borderColor: theme.node.stroke }}>
+                {mode === "agent" ? (
+                    <div className="mb-2 flex items-center justify-between gap-2 border-b pb-2" style={{ borderColor: theme.node.stroke }}>
+                        <Popover
+                            trigger="click"
+                            placement="topLeft"
+                            open={skillOpen}
+                            onOpenChange={setSkillOpen}
+                            content={<div className="thin-scrollbar max-h-80 w-72 overflow-y-auto p-1">
+                                <div className="px-2 pb-2 text-xs" style={{ color: theme.node.muted }}>选择一项能力，Agent 将按对应方法和工具权限执行</div>
+                                {skillGroups.map((group) => <div key={group.category} className="mb-2">
+                                    <div className="px-2 py-1 text-[11px] font-medium uppercase tracking-wider" style={{ color: theme.node.muted }}>{group.category}</div>
+                                    {group.items.map((skill) => <button key={skill.id} type="button" className="mb-1 block w-full rounded-lg border px-2.5 py-2 text-left transition" style={{ background: skill.id === selectedSkillId ? theme.toolbar.itemHover : "transparent", borderColor: skill.id === selectedSkillId ? theme.node.stroke : "transparent", color: theme.node.text }} onClick={() => { onSkillChange?.(skill.id); setSkillOpen(false); }}>
+                                        <span className="block text-sm font-medium">{skill.name}</span>
+                                        {skill.description ? <span className="mt-0.5 block line-clamp-2 text-xs leading-5" style={{ color: theme.node.muted }}>{skill.description}</span> : null}
+                                    </button>)}
+                                </div>)}
+                            </div>}
+                        >
+                            <button type="button" className="flex min-w-0 items-center gap-2 rounded-lg px-1.5 py-1 text-left transition" style={{ color: theme.node.text }}>
+                                <span className="grid size-7 shrink-0 place-items-center rounded-md" style={{ background: theme.toolbar.itemHover }}><Sparkles className="size-3.5" /></span>
+                                <span className="min-w-0"><span className="block truncate text-xs font-medium">{selectedSkill?.name || "选择 Skill"}</span><span className="block truncate text-[11px]" style={{ color: theme.node.muted }}>{selectedSkill ? selectedSkill.category || "通用能力" : "使用专门的创作流程"}</span></span>
+                                <ChevronDown className="size-3.5 shrink-0" />
+                            </button>
+                        </Popover>
+                        <span className="flex shrink-0 items-center gap-1.5 text-[11px]" style={{ color: theme.node.muted }}><span className={`size-1.5 rounded-full ${isRunning ? "animate-pulse" : ""}`} style={{ background: isRunning ? theme.node.text : theme.node.stroke }} />{isRunning ? "运行中" : "待命"}</span>
+                    </div>
+                ) : null}
                 <textarea
                     value={prompt}
                     onChange={(event) => onPromptChange(event.target.value)}
@@ -76,7 +113,7 @@ export function CanvasAssistantComposer({
                     }}
                     className="thin-scrollbar h-20 w-full resize-none border-0 bg-transparent px-1 py-1 text-sm leading-5 outline-none placeholder:opacity-40"
                     style={{ color: theme.node.text }}
-                    placeholder={mode === "chat" ? "讨论创意、分析内容，不会操作画布" : "描述要执行的任务，Agent 可以操作画布"}
+                    placeholder={mode === "chat" ? "讨论创意、分析内容，不会操作画布" : selectedSkill?.placeholder || "描述要执行的任务，Agent 可以操作画布"}
                 />
                 <div className="mt-2 flex items-center justify-between gap-2">
                     <div className="flex min-w-0 flex-1 items-center gap-1">

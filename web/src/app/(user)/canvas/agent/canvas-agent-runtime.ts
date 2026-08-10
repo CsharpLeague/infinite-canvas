@@ -1,4 +1,6 @@
 import { requestCanvasAgentTurn } from "@/services/api/canvas-agent";
+import { cancelCanvasAgentRun, createCanvasAgentRun, recoverCanvasAgentRun, streamCanvasAgentRun, submitCanvasAgentToolResults, type CanvasAgentRun, type CanvasAgentRunToolCall } from "@/services/api/canvas-agent-runs";
+import { useUserStore } from "@/stores/use-user-store";
 import type { AiConfig } from "@/stores/use-config-store";
 import type {
     CanvasAgentContent,
@@ -13,7 +15,6 @@ import { buildCanvasAgentSkillPrompt, buildCanvasChatPrompt } from "./canvas-age
 import {
     CANVAS_AGENT_TOOLS,
     canvasAgentActionLabel,
-    isCanvasAgentMediaAction,
     normalizeCanvasAgentAction,
     parseCanvasAgentJson,
     userLikelyRequestedCanvasAction,
@@ -44,6 +45,14 @@ export type CanvasAgentRuntimeEvent = {
 };
 
 export type RunCanvasAgentInput = {
+    sessionId: string;
+    skillId?: string;
+    existingRun?: CanvasAgentRun;
+    toolResults?: Record<string, CanvasAgentToolResult>;
+    toolExecutions?: Record<string, { status: "started" | "completed"; result?: CanvasAgentToolResult }>;
+    onRunChange?: (run?: CanvasAgentRun) => void;
+    onToolResult?: (callId: string, result: CanvasAgentToolResult) => void;
+    onToolStart?: (callId: string) => void;
     mode: CanvasAssistantMode;
     config: AiConfig;
     initialState: CanvasAgentState;
@@ -75,6 +84,7 @@ export function createCanvasAgentState(): CanvasAgentState {
 }
 
 export async function runCanvasAgent(input: RunCanvasAgentInput): Promise<RunCanvasAgentResult> {
+    if (input.mode === "agent") return runServerCanvasAgent(input);
     let state = { ...createCanvasAgentState(), ...(input.initialState || {}) };
     let allowTools = input.mode === "agent";
     let hasExecutedActions = false;
@@ -168,6 +178,116 @@ export async function runCanvasAgent(input: RunCanvasAgentInput): Promise<RunCan
     return { reply, state, protocolMessages: persistCanvasAgentProtocolMessages(protocolMessages) };
 }
 
+async function runServerCanvasAgent(input: RunCanvasAgentInput): Promise<RunCanvasAgentResult> {
+    let state = { ...createCanvasAgentState(), ...(input.initialState || {}) };
+    let protocolMessages = trimProtocolMessages([
+        ...(Array.isArray(input.protocolMessages) ? input.protocolMessages : []),
+        ...(input.existingRun ? [] : [{ role: "user" as const, content: buildUserContent(input.userText, input.references, input.config.textModel || input.config.model) }]),
+    ]);
+    const context = input.getContext(state);
+    const token = useUserStore.getState().token || undefined;
+    if (!token) throw new Error("Agent 服务端运行需要先登录；未登录时仍可使用对话模式和本地画布。")
+    let run = input.existingRun;
+    if (!run) try {
+        run = await createCanvasAgentRun({
+        token,
+        sessionId: input.sessionId,
+        canvasId: context.project.id,
+        skillId: input.skillId,
+        phase: state.phase,
+        config: input.config,
+        message: input.userText + (input.references.length ? "\n\n本次明确引用节点：" + input.references.map((item) => `${item.id}（${item.title}）`).join("、") : ""),
+        canvasContext: context,
+        });
+    } catch (error) {
+        if (!(error instanceof Error) || !error.message.includes("未完成的 Agent Run")) throw error;
+        run = await recoverCanvasAgentRun(input.sessionId, context.project.id, token);
+    }
+    input.onRunChange?.(run);
+    let after = 0;
+    let reply = "";
+    let terminalError = "";
+    let terminal = false;
+    let reconnectAttempts = 0;
+    const executedCallIds = new Set<string>();
+    const abort = () => void cancelCanvasAgentRun(run, token);
+    input.signal?.addEventListener("abort", abort, { once: true });
+    try {
+        while (!terminal) {
+            throwIfAborted(input.signal);
+            let requested: CanvasAgentRunToolCall[] = [];
+            let turnText = "";
+            try {
+                after = await streamCanvasAgentRun(run, {
+                    after,
+                    token,
+                    signal: input.signal,
+                    onCursor: (id) => { after = id; },
+                    onEvent: (event) => {
+                    if (event.type === "run.status") input.onEvent?.({ status: "thinking", label: "正在由服务端 Agent 继续推理" });
+                    if (event.type === "text.delta" && typeof event.data.delta === "string") {
+                        turnText += event.data.delta;
+                        reply += event.data.delta;
+                        input.onTextDelta?.(reply);
+                    }
+                    if (event.type === "text.completed" && typeof event.data.text === "string" && !turnText) {
+                        turnText = event.data.text;
+                        reply += event.data.text;
+                        input.onTextDelta?.(reply);
+                    }
+                    if (event.type === "tool.requested" && Array.isArray(event.data.calls)) requested = event.data.calls as CanvasAgentRunToolCall[];
+                    if (event.type === "run.completed") terminal = true;
+                    if (event.type === "run.failed" || event.type === "run.cancelled") {
+                        terminalError = typeof event.data.error === "string" ? event.data.error : event.type === "run.cancelled" ? "Agent 已停止" : "Agent 执行失败";
+                        terminal = true;
+                    }
+                    },
+                });
+                reconnectAttempts = 0;
+            } catch (error) {
+                if (input.signal?.aborted) throw error;
+                if (++reconnectAttempts > 5) throw error;
+                input.onEvent?.({ status: "waiting", label: "连接中断，正在恢复 Agent 事件" });
+                await new Promise((resolve) => setTimeout(resolve, Math.min(4000, 500 * 2 ** reconnectAttempts)));
+                continue;
+            }
+            if (terminal) break;
+            const calls = requested.filter((call) => !executedCallIds.has(call.id));
+            if (!calls.length) throw new Error("Agent 事件流结束，但没有收到终态或待执行工具");
+            const actions = calls.map((call) => normalizeCanvasAgentAction(call.name, call.arguments, call.id));
+            input.onEvent?.({ status: "running", label: actions.length === 1 ? canvasAgentActionLabel(actions[0]) : `正在执行 ${actions.length} 个画布操作` });
+            protocolMessages = trimProtocolMessages([...protocolMessages, { role: "assistant" as const, content: turnText || undefined, toolCalls: actions.map((action) => ({ id: action.id, name: action.name, arguments: action.arguments })) }]);
+            const results = await executeActions(actions, state, async (action) => {
+                const cached = input.toolResults?.[action.id];
+                if (cached) return cached;
+                const recovering = input.toolExecutions?.[action.id]?.status === "started";
+                if (!recovering) input.onToolStart?.(action.id);
+                const result = await input.executeAction(recovering ? { ...action, recovery: true } : action);
+                input.onToolResult?.(action.id, result);
+                return result;
+            }, input.signal, input.onEvent);
+            state = results.state;
+            calls.forEach((call) => executedCallIds.add(call.id));
+            protocolMessages = trimProtocolMessages([...protocolMessages, ...results.items.map(({ action, result }) => ({ role: "tool" as const, toolCallId: action.id, name: action.name, content: JSON.stringify(result) }))]);
+            input.onCheckpoint?.({ state, protocolMessages: persistCanvasAgentProtocolMessages(protocolMessages) });
+            await submitCanvasAgentToolResults(run, results.items.map(({ action, result }) => ({ callId: action.id, name: action.name, result })), token);
+        }
+    } finally {
+        input.signal?.removeEventListener("abort", abort);
+        if (input.signal?.aborted) input.onRunChange?.(undefined);
+    }
+    if (terminalError) {
+        input.onRunChange?.(undefined);
+        const error = new Error(terminalError);
+        if (input.signal?.aborted) error.name = "AbortError";
+        throw error;
+    }
+    const finalReply = reply.trim() || "Agent 已完成本轮处理。";
+    input.onRunChange?.(undefined);
+    protocolMessages = trimProtocolMessages([...protocolMessages, { role: "assistant" as const, content: finalReply }]);
+    return { reply: finalReply, state, protocolMessages: persistCanvasAgentProtocolMessages(protocolMessages) };
+}
+
 async function executeActions(
     actions: CanvasAgentAction[],
     initialState: CanvasAgentState,
@@ -196,12 +316,10 @@ async function executeActions(
         }
     };
 
-    const items = actions.every(isCanvasAgentMediaAction)
-        ? await Promise.all(actions.map(executeOne))
-        : await actions.reduce<Promise<Array<{ action: CanvasAgentAction; result: CanvasAgentToolResult }>>>(
-            async (pending, action) => [...(await pending), await executeOne(action)],
-            Promise.resolve([]),
-        );
+    const items = await actions.reduce<Promise<Array<{ action: CanvasAgentAction; result: CanvasAgentToolResult }>>>(
+        async (pending, action) => [...(await pending), await executeOne(action)],
+        Promise.resolve([]),
+    );
     return { items, state };
 }
 

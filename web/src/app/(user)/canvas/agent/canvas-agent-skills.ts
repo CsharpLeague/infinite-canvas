@@ -14,7 +14,11 @@ import { VIDEO_MULTI_SHOT_SKILL } from "./skills/video-multi-shot";
 import { VIDEO_SINGLE_SHOT_SKILL } from "./skills/video-single-shot";
 import { WORKFLOW_SKILL } from "./skills/workflow";
 
-export function buildCanvasAgentSkillPrompt(phase: CanvasAgentPhase, userText: string, context: CanvasAgentContext) {
+export function buildCanvasAgentSkillPrompt(phase: CanvasAgentPhase, userText: string, context: CanvasAgentContext, explicitSkillInstructions?: string, skillFiles?: Record<string, string>) {
+    if (explicitSkillInstructions?.trim()) {
+        const references = Object.entries(skillFiles || {}).filter(([name]) => name !== "SKILL.md").map(([name, content]) => `## Skill 参考：${name}\n${content}`);
+        return [CORE_SKILL, explicitSkillInstructions.trim(), ...references, "当前阶段：" + phase, serializeCanvasAgentContext(context)].join("\n\n");
+    }
     const intent = buildIntentText(userText, context);
     const selectedTypes = new Set<string>(context.nodes.filter((node) => context.selectedNodeIds.includes(node.id)).map((node) => node.type));
     const skills = [CORE_SKILL, WORKFLOW_SKILL];

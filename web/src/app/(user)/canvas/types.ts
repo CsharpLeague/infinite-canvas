@@ -33,6 +33,7 @@ export type CameraControlOptions = {
 };
 
 export type CanvasNodeMetadata = {
+    agentCallId?: string;
     content?: string;
     groupId?: string;
     composerContent?: string;
@@ -135,6 +136,7 @@ export type CanvasConnection = {
     id: string;
     fromNodeId: string;
     toNodeId: string;
+    agentCallId?: string;
 };
 
 export type CanvasAssistantReference = {
@@ -241,6 +243,10 @@ export type CanvasAssistantSession = {
     id: string;
     title: string;
     mode: CanvasAssistantMode;
+    skillId?: string;
+    activeRun?: { id: string; token: string; sessionId: string; skillId: string; status: "running" | "waiting_tool" | "completed" | "failed" | "cancelled"; phase: string };
+    toolResults?: Record<string, CanvasAgentToolResult>;
+    toolExecutions?: Record<string, { status: "started" | "completed"; result?: CanvasAgentToolResult }>;
     messages: CanvasAssistantMessage[];
     agentState: CanvasAgentState;
     chatProtocolMessages: CanvasAgentProtocolMessage[];

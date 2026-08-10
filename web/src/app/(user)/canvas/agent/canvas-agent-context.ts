@@ -67,7 +67,8 @@ type BuildCanvasAgentContextInput = {
     agentState: CanvasAgentState;
 };
 
-const MAX_CONTEXT_NODES = 120;
+const MAX_CONTEXT_NODES = 20;
+const MAX_CONTEXT_CONNECTIONS = 30;
 const MAX_TEXT_LENGTH = 4000;
 
 export function buildCanvasAgentContext(input: BuildCanvasAgentContextInput): CanvasAgentContext {
@@ -87,10 +88,7 @@ export function buildCanvasAgentContext(input: BuildCanvasAgentContextInput): Ca
         if (node.metadata?.status === "loading" || node.metadata?.status === "error") prioritizedIds.add(node.id);
     });
 
-    const orderedNodes = [
-        ...input.nodes.filter((node) => prioritizedIds.has(node.id)),
-        ...input.nodes.filter((node) => !prioritizedIds.has(node.id)),
-    ].slice(0, MAX_CONTEXT_NODES);
+    const orderedNodes = input.nodes.filter((node) => prioritizedIds.has(node.id)).slice(0, MAX_CONTEXT_NODES);
     const includedIds = new Set(orderedNodes.map((node) => node.id));
     const videoModel = input.config.videoModel || input.config.model;
 
@@ -104,7 +102,7 @@ export function buildCanvasAgentContext(input: BuildCanvasAgentContextInput): Ca
         agentState: input.agentState,
         selectedNodeIds,
         nodes: orderedNodes.map(summarizeNode),
-        connections: input.connections.filter((connection) => includedIds.has(connection.fromNodeId) && includedIds.has(connection.toNodeId)),
+        connections: input.connections.filter((connection) => includedIds.has(connection.fromNodeId) && includedIds.has(connection.toNodeId)).slice(0, MAX_CONTEXT_CONNECTIONS),
         generation: {
             textModel: input.config.textModel || input.config.model,
             imageModel: input.config.imageModel || input.config.model,
