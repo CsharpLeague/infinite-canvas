@@ -81,6 +81,7 @@
 
 ## 发版本流程
 
+- Linux 发布包不包含 `web/public/banners` 下由首页 CDN 加载的大体积素材；修改打包脚本时保持该排除规则。
 - 发版本时，先把 `CHANGELOG.md` 的 `Unreleased` 变更整理成新的版本记录，并保留空的 `Unreleased` 标题。
 - 按当前版本号提升一个版本，更新根目录 `VERSION`。
 - 将当前未提交的代码全部提交到 Git。

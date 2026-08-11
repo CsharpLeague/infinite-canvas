@@ -3352,10 +3352,7 @@ function InfiniteCanvasPage({ projectId }: { projectId: string }) {
                         const seconds = typeof args.seconds === "number" ? args.seconds : Number(generationConfig.videoSeconds);
                         const durationError = validateCanvasAgentVideoSeconds(generationConfig.model, seconds);
                         if (durationError) return { ok: false, code: "unsupported_duration", message: durationError, supported: canvasAgentVideoDurationHint(generationConfig.model) };
-                        const generateAudio = generationConfig.videoGenerateAudio === "true";
-                        if (generateAudio && !supportsVideoAudioGeneration(generationConfig.model)) {
-                            return { ok: false, code: "video_audio_not_supported", message: "当前全局视频模型不支持视频原生声音" };
-                        }
+                        const generateAudio = supportsVideoAudioGeneration(generationConfig.model) && generationConfig.videoGenerateAudio === "true";
                         metadata.seconds = String(seconds);
                         metadata.generateAudio = String(generateAudio);
                     }

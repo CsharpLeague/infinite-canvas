@@ -59,7 +59,12 @@ $standalone = Join-Path $root "web\.next\standalone"
 $webDist = Join-Path $dist "web\.next\standalone"
 Copy-Item -LiteralPath $standalone -Destination $webDist -Recurse -Force
 New-Item -ItemType Directory -Force -Path (Join-Path $webDist ".next") | Out-Null
-Copy-Item -LiteralPath (Join-Path $root "web\public") -Destination (Join-Path $webDist "public") -Recurse -Force
+$publicSource = Join-Path $root "web\public"
+$publicDist = Join-Path $webDist "public"
+New-Item -ItemType Directory -Force -Path $publicDist | Out-Null
+Get-ChildItem -LiteralPath $publicSource | Where-Object Name -NE "banners" | ForEach-Object {
+    Copy-Item -LiteralPath $_.FullName -Destination $publicDist -Recurse -Force
+}
 Copy-Item -LiteralPath (Join-Path $root "web\.next\static") -Destination (Join-Path $webDist ".next\static") -Recurse -Force
 Copy-Item -LiteralPath (Join-Path $root "ecosystem.config.cjs") -Destination $dist -Force
 $startScript = Join-Path $dist "start.sh"
